@@ -1,0 +1,3170 @@
+========================================
+COMPONENTE: ThisWorkbook
+TIPO: 100
+========================================
+
+
+Option Explicit
+
+Private Sub Workbook_Open()
+
+    Application.EnableEvents = True
+
+    '1) Leer config
+    Dim isTemplate As String
+    isTemplate = GetConfig("IsTemplate", "0")
+
+    '2) Setear globals SIEMPRE
+    gIsTemplate = (Trim$(isTemplate) = "1")
+
+    If gIsTemplate Then
+        gLoc = ""
+        gLocDisplay = "TEMPLATE"
+    Else
+        gLoc = Trim$(GetConfig("LocationCode", ""))
+        gLocDisplay = Trim$(GetConfig("LocationDisplay", ""))
+
+        If gLoc = "" Or gLocDisplay = "" Then
+            MsgBox "Este archivo no tiene locación configurada (Config).", vbCritical
+            Exit Sub
+        End If
+    End If
+
+    '3) Mostrar Menu
+    On Error Resume Next
+    Me.Worksheets("Menu").Visible = xlSheetVisible
+    Me.Worksheets("Menu").Activate
+    On Error GoTo 0
+
+    '4) Protecciones (UIOnly se pierde al abrir, por eso aquí)
+    InicializarProtecciones
+
+    '5) Mostrar menú
+    frmMenuPrincipal.Show
+
+End Sub
+
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    modMantenimientoMatrices.LimpiarMatricesRelevantes
+    On Error GoTo 0
+
+    Application.ScreenUpdating = False
+
+    For Each ws In Me.Worksheets
+        If ws.Name = "Menu" Then
+            ws.Visible = xlSheetVisible
+        Else
+            ws.Visible = xlSheetHidden
+        End If
+    Next ws
+
+    On Error Resume Next
+    Me.Worksheets("Menu").Activate
+    On Error GoTo 0
+
+    Application.ScreenUpdating = True
+End Sub
+
+
+
+========================================
+COMPONENTE: frmIncidencias
+TIPO: 3
+========================================
+Option Explicit
+
+'--- bandera para saber si estamos editando o capturando nuevo ---
+Public EnEdicion As Boolean
+
+'--- rango de días del periodo seleccionado ---
+Private gDiaIni As Long
+Private gDiaFin As Long
+
+'--- datos fijos del empleado cargados desde la hoja Empleados ---
+Private mGrupo As String
+Private mCiudad As String
+
+'--- glosario de incidencias disponibles ---
+Private tiposInc() As String
+
+
+'===================================================
+'  INICIALIZAR FORMULARIO
+'===================================================
+Private Sub UserForm_Initialize()
+
+    Dim i As Long, k As Long
+    Dim codigos As Variant
+
+    EnEdicion = False   'por default
+
+    '-----------------------------------------
+    ' 1) TIPOS DE INCIDENCIA (desde catálogo activo)
+    '-----------------------------------------
+    codigos = modCatalogoIncidencias.GetCodigosActivos()
+
+    ' Preparar combos/labels de día
+    For i = 1 To 16
+
+        With Me.Controls("cboDia" & i)
+            .Clear
+            .AddItem "" 'permitimos vacío
+
+            If IsArray(codigos) Then
+                For k = LBound(codigos) To UBound(codigos)
+                    .AddItem codigos(k)
+                Next k
+            End If
+
+            .Visible = False
+
+            ' Solo lista (sin captura manual)
+            On Error Resume Next
+            .Style = fmStyleDropDownList
+            On Error GoTo 0
+        End With
+
+        With Me.Controls("lblDia" & i)
+            .caption = ""
+            .Visible = False
+        End With
+
+    Next i
+
+    '-----------------------------------------
+    ' 2) Mostrar locación desde Config
+    '-----------------------------------------
+    lblLocacion.caption = GetConfig("LocationDisplay", gLoc)
+
+    '-----------------------------------------
+    ' 2b) Bono comedor: solo para CAP
+    '-----------------------------------------
+    If UCase$(gLoc) = "CAP" Then
+        txtBonoComedor.Enabled = True
+        txtBonoComedor.Visible = True
+        On Error Resume Next
+        lblBonoComedor.Visible = True
+        On Error GoTo 0
+    Else
+        txtBonoComedor.Value = ""
+        txtBonoComedor.Enabled = False
+        txtBonoComedor.Visible = False
+        On Error Resume Next
+        lblBonoComedor.Visible = False
+        On Error GoTo 0
+    End If
+
+    '-----------------------------------------
+    ' 3) Configurar periodo (labels de días y lblPeriodo)
+    '-----------------------------------------
+    ConfigurarPeriodo
+
+End Sub
+
+'===================================================
+'  ÚLTIMO DÍA DEL MES
+'===================================================
+Private Function UltimoDiaMes(anio As Long, mes As Long) As Long
+    UltimoDiaMes = Day(DateSerial(anio, mes + 1, 0))
+End Function
+
+
+'===================================================
+'  OBTENER RANGO DE DÍAS DEL PERIODO
+'===================================================
+Private Sub ObtenerRangoPeriodo( _
+        ByVal anio As Long, _
+        ByVal mes As Long, _
+        ByVal tipoPeriodo As String, _
+        ByVal numPeriodo As Long, _
+        ByRef diaIni As Long, _
+        ByRef diaFin As Long)
+
+    Dim uDia As Long
+    uDia = UltimoDiaMes(anio, mes)
+
+    Select Case UCase(tipoPeriodo)
+
+        Case "SEMANAL"
+            Select Case numPeriodo
+                Case 1: diaIni = 1:  diaFin = 7
+                Case 2: diaIni = 8:  diaFin = 14
+                Case 3: diaIni = 15: diaFin = 21
+                Case 4: diaIni = 22: diaFin = uDia
+            End Select
+
+        Case "QUINCENAL"
+            Select Case numPeriodo
+                Case 1: diaIni = 1:  diaFin = 15
+                Case 2: diaIni = 16: diaFin = uDia
+            End Select
+    End Select
+End Sub
+
+
+'===================================================
+'  CONFIGURAR LABELS/COMBOS DE DÍA Y TEXTO DEL PERIODO
+'===================================================
+Private Sub ConfigurarPeriodo()
+    Dim numDias As Long
+    Dim i As Long
+    Dim dia As Long
+    Dim fIni As Date, fFin As Date
+    Dim nombreMes As String
+
+    If gAnio = 0 Or gMes = 0 Or gTipoPeriodo = "" Or gPeriodo = 0 Then Exit Sub
+
+    ObtenerRangoPeriodo gAnio, gMes, gTipoPeriodo, gPeriodo, gDiaIni, gDiaFin
+    numDias = gDiaFin - gDiaIni + 1
+
+    fIni = DateSerial(gAnio, gMes, gDiaIni)
+    fFin = DateSerial(gAnio, gMes, gDiaFin)
+    nombreMes = UCase(Format(fIni, "mmmm"))
+
+    lblPeriodo.caption = Format(fIni, "dd") & "-" & _
+                         Format(fFin, "dd") & " " & _
+                         nombreMes & " " & gAnio
+
+    For i = 1 To 16
+        With Me.Controls("lblDia" & i)
+            If i <= numDias Then
+                dia = gDiaIni + i - 1
+                .caption = CStr(dia)
+                .Visible = True
+            Else
+                .caption = ""
+                .Visible = False
+            End If
+        End With
+
+        With Me.Controls("cboDia" & i)
+            If i <= numDias Then
+                .Visible = True
+            Else
+                .Value = ""
+                .Visible = False
+            End If
+        End With
+    Next i
+End Sub
+
+
+'===================================================
+'  CARGAR DATOS DEL EMPLEADO DESDE HOJA "Empleados"
+'===================================================
+Private Function CargarEmpleado(ByVal numEmp As Long) As Boolean
+    Dim ws As Worksheet
+    Dim cel As Range
+
+    On Error GoTo ErrHandler
+
+    Set ws = ThisWorkbook.Worksheets("Empleados")
+
+    Set cel = ws.Columns("C").Find(What:=numEmp, LookAt:=xlWhole) 'C = NumeroEmpleado
+    If cel Is Nothing Then
+        CargarEmpleado = False
+        Exit Function
+    End If
+
+    With cel.EntireRow
+        mGrupo = .Cells(1, "A").Value
+        mCiudad = .Cells(1, "B").Value
+
+        txtNumEmpleado.Value = .Cells(1, "C").Value
+        txtUsuarioCars.Value = .Cells(1, "D").Value
+        txtDriverCars.Value = .Cells(1, "E").Value
+        txtPuesto.Value = .Cells(1, "F").Value
+        txtActividad.Value = .Cells(1, "G").Value
+        txtNombre.Value = .Cells(1, "H").Value
+    End With
+
+    CargarEmpleado = True
+    Exit Function
+
+ErrHandler:
+    CargarEmpleado = False
+End Function
+
+
+Private Sub txtNumEmpleado_AfterUpdate()
+    Dim n As Long
+
+    If Trim(txtNumEmpleado.Value) = "" Then Exit Sub
+
+    If Not IsNumeric(txtNumEmpleado.Value) Then
+        MsgBox "El número de empleado debe ser numérico.", vbExclamation
+        txtNumEmpleado.SetFocus
+        Exit Sub
+    End If
+
+    n = CLng(txtNumEmpleado.Value)
+
+    If Not CargarEmpleado(n) Then
+        MsgBox "Empleado no encontrado en la hoja 'Empleados'.", vbExclamation
+        txtNumEmpleado.SetFocus
+    End If
+End Sub
+
+
+'===================================================
+'  Validar que un código de incidencia esté en glosario
+'===================================================
+Private Function EsCodigoValido(ByVal cod As String) As Boolean
+    Dim k As Long
+    cod = UCase$(Trim$(cod))
+
+    'Vacío siempre es válido (sin incidencia)
+    If cod = "" Then
+        EsCodigoValido = True
+        Exit Function
+    End If
+
+    For k = LBound(tiposInc) To UBound(tiposInc)
+        If cod = tiposInc(k) Then
+            EsCodigoValido = True
+            Exit Function
+        End If
+    Next k
+
+    EsCodigoValido = False
+End Function
+
+
+'===================================================
+'  CARGAR INCIDENCIAS DESDE LA BD (para botón EDITAR)
+'===================================================
+Public Sub CargarDesdeBD(ByVal numEmp As Long)
+
+    Dim ws As Worksheet
+    Dim ultFila As Long
+    Dim i As Long
+    Dim dia As Long
+    Dim idx As Long
+    Dim adicional As String
+    Dim obs As String
+    Dim bono As Variant
+    Dim cod As String
+
+    EnEdicion = True
+
+    ' Limpiar antes de cargar
+    LimpiarIncidencias
+    txtAdicional.Value = ""
+    txtObservaciones.Value = ""
+    On Error Resume Next
+    txtBonoComedor.Value = ""
+    On Error GoTo 0
+
+    ' Datos del empleado
+    If Not CargarEmpleado(numEmp) Then
+        MsgBox "Empleado no encontrado en la hoja 'Empleados'.", vbExclamation
+        Exit Sub
+    End If
+
+    Set ws = ThisWorkbook.Worksheets("BDIncidencias_Local")
+    ultFila = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    adicional = ""
+    obs = ""
+    bono = ""
+
+    For i = 2 To ultFila
+
+        If ws.Cells(i, "A").Value = gLoc _
+           And ws.Cells(i, "C").Value = numEmp _
+           And ws.Cells(i, "I").Value = gAnio _
+           And ws.Cells(i, "J").Value = gMes _
+           And ws.Cells(i, "K").Value = gTipoPeriodo _
+           And ws.Cells(i, "L").Value = gPeriodo Then
+
+            dia = CLng(ws.Cells(i, "M").Value)
+            idx = dia - gDiaIni + 1    '1..16
+
+            If idx >= 1 And idx <= 16 Then
+
+                cod = CStr(ws.Cells(i, "O").Value)
+                cod = modCatalogoIncidencias.CanonizarCodigo(cod)
+
+                ' Si el código no existe en el dropdown (catálogo), NO lo metas.
+                ' Mejor avisamos: así detectas cat incompleto.
+                If cod <> "" Then
+                    If Not modCatalogoIncidencias.EsCodigoValido(cod) Then
+                        MsgBox "Código en BD no existe en el catálogo: '" & cod & "'" & vbCrLf & _
+                               "Empleado: " & numEmp & " | Día: " & dia & vbCrLf & _
+                               "Solución: agrega el código al catálogo o ajusta alias en CanonizarCodigo.", _
+                               vbExclamation, "Catálogo incompleto"
+                    Else
+                        Me.Controls("cboDia" & idx).Value = cod
+                    End If
+                End If
+
+            End If
+
+            If adicional = "" Then adicional = CStr(ws.Cells(i, "P").Value)
+            If obs = "" Then obs = CStr(ws.Cells(i, "Q").Value)
+
+            ' Bono comedor en col 22
+            If bono = "" Then
+                bono = ws.Cells(i, 22).Value
+            End If
+
+        End If
+    Next i
+
+    txtAdicional.Value = adicional
+    txtObservaciones.Value = obs
+
+    If UCase$(gLoc) = "CAP" Then
+        txtBonoComedor.Value = bono
+    End If
+
+End Sub
+
+'===================================================
+'  GUARDAR INCIDENCIAS EN BDIncidencias_Local (UPSERT por UID)
+'===================================================
+Private Sub cmdGuardar_Click()
+    On Error GoTo Salir
+
+    modSeguridadIncidencias.ValidarPeriodoAbiertoOrExit
+
+    Dim ws As Worksheet
+    Dim i As Long
+    Dim diaReal As Long
+    Dim cod As String
+    Dim f As Date
+    Dim numEmp As Long
+    Dim resp As VbMsgBoxResult
+    Dim tieneNueva As Boolean
+
+    Dim uid As String
+    Dim rowUID As Long
+    Dim ultimaFila As Long
+    Dim nextID As Long
+
+    '------------------------------------
+    ' Validaciones básicas
+    '------------------------------------
+    If Trim$(txtNumEmpleado.Value) = "" Then
+        MsgBox "Captura el número de empleado.", vbExclamation
+        Exit Sub
+    End If
+
+    If Not IsNumeric(txtNumEmpleado.Value) Then
+        MsgBox "El número de empleado debe ser numérico.", vbExclamation
+        Exit Sub
+    End If
+
+    If gAnio = 0 Or gMes = 0 Or gTipoPeriodo = "" Or gPeriodo = 0 Or gLoc = "" Then
+        MsgBox "No hay periodo o locación seleccionados. Cierra y vuelve a entrar desde el menú.", vbCritical
+        Exit Sub
+    End If
+
+    numEmp = CLng(txtNumEmpleado.Value)
+
+    '------------------------------------
+    ' Validar códigos contra catálogo (canonizando)
+    '------------------------------------
+    For i = 1 To 16
+        If Me.Controls("cboDia" & i).Visible Then
+
+            cod = modCatalogoIncidencias.CanonizarCodigo(Me.Controls("cboDia" & i).Value)
+
+            If Not modCatalogoIncidencias.EsCodigoValido(cod) Then
+                diaReal = CLng(Me.Controls("lblDia" & i).caption)
+                MsgBox "El código '" & cod & "' del día " & diaReal & " no es válido.", vbExclamation
+                Exit Sub
+            End If
+        End If
+    Next i
+
+    '------------------------------------
+    ' ¿Hay algo capturado?
+    '------------------------------------
+    tieneNueva = False
+    For i = 1 To 16
+        If Me.Controls("cboDia" & i).Visible Then
+            cod = modCatalogoIncidencias.CanonizarCodigo(Me.Controls("cboDia" & i).Value)
+            If cod <> "" Then
+                tieneNueva = True
+                Exit For
+            End If
+        End If
+    Next i
+
+    If Not tieneNueva And Not EnEdicion Then
+        MsgBox "No capturaste ninguna incidencia.", vbInformation
+        Exit Sub
+    End If
+
+    '------------------------------------
+    ' Hoja BD
+    '------------------------------------
+    Set ws = ThisWorkbook.Worksheets("BDIncidencias_Local")
+
+    On Error Resume Next
+    ws.Unprotect "AVASA"
+    ws.Unprotect "IncidenciasAVASA"
+    On Error GoTo 0
+
+    ws.Columns(13).NumberFormat = "0"                   'M Dia
+    ws.Columns(14).NumberFormat = "dd/mm/yyyy"          'N Fecha
+    ws.Columns(19).NumberFormat = "yyyy-mm-dd hh:mm:ss" 'S FechaHora
+
+    '------------------------------------
+    ' Confirmación si NO es edición y ya existe data del empleado en ese periodo
+    '------------------------------------
+    If Not EnEdicion Then
+        If ExisteIncidenciasEmpleadoPeriodo(numEmp) Then
+            resp = MsgBox( _
+                "Este empleado ya tiene incidencias en este periodo." & vbCrLf & _
+                "Se actualizarán/mezclarán por día (UID)." & vbCrLf & vbCrLf & _
+                "¿Continuar?", _
+                vbQuestion + vbYesNo + vbDefaultButton2, "Actualizar incidencias")
+            If resp = vbNo Then Exit Sub
+        End If
+    End If
+
+    '------------------------------------
+    ' NEXT ID (solo si insertamos nuevas filas)
+    '------------------------------------
+    nextID = GetNextID(ws)
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    '------------------------------------
+    ' Recorrer días visibles (1..16)
+    '------------------------------------
+    For i = 1 To 16
+
+        If Me.Controls("cboDia" & i).Visible Then
+
+            diaReal = CLng(Me.Controls("lblDia" & i).caption)
+            cod = modCatalogoIncidencias.CanonizarCodigo(Me.Controls("cboDia" & i).Value)
+            f = DateSerial(gAnio, gMes, diaReal)
+
+            uid = BuildUID(gLoc, numEmp, gAnio, gMes, gTipoPeriodo, gPeriodo, diaReal)
+            rowUID = FindRowByUID(ws, uid) 'busca en columna W
+
+            '--- Si está vacío y estamos EDITANDO: borrar el registro existente para ese día ---
+            If cod = "" Then
+                If EnEdicion Then
+                    If rowUID > 0 Then
+                        ws.Rows(rowUID).Delete
+                    End If
+                End If
+                GoTo NextI
+            End If
+
+            '--- Insertar o actualizar ---
+            If rowUID = 0 Then
+                ultimaFila = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row + 1
+                rowUID = ultimaFila
+
+                ws.Cells(rowUID, 21).Value = nextID 'IDRegistro col U
+                nextID = nextID + 1
+
+                ws.Cells(rowUID, "W").Value = uid 'UID col W
+            End If
+
+            With ws
+                .Cells(rowUID, 1).Value = gLoc                        'A GRUPO/loc
+                .Cells(rowUID, 2).Value = lblLocacion.caption         'B CIUDAD
+                .Cells(rowUID, 3).Value = numEmp                      'C NumeroEmpleado
+                .Cells(rowUID, 4).Value = txtUsuarioCars.Value        'D UsuarioCARs+
+                .Cells(rowUID, 5).Value = txtDriverCars.Value         'E DriverCARs+
+                .Cells(rowUID, 6).Value = txtPuesto.Value             'F Puesto
+                .Cells(rowUID, 7).Value = txtActividad.Value          'G Actividad
+                .Cells(rowUID, 8).Value = txtNombre.Value             'H Nombre
+
+                .Cells(rowUID, 9).Value = gAnio                       'I Año
+                .Cells(rowUID, 10).Value = gMes                       'J Mes
+                .Cells(rowUID, 11).Value = gTipoPeriodo               'K TipoPeriodo
+                .Cells(rowUID, 12).Value = gPeriodo                   'L Periodo
+                .Cells(rowUID, 13).Value = CLng(diaReal)              'M Dia
+                .Cells(rowUID, 14).Value = f                          'N Fecha
+                .Cells(rowUID, 14).NumberFormat = "dd/mm/yyyy"
+
+                .Cells(rowUID, 15).Value = cod                        'O CodigoInc (YA CANONIZADO)
+                .Cells(rowUID, 16).Value = txtAdicional.Value         'P Adicional
+                .Cells(rowUID, 17).Value = UCase$(txtObservaciones.Value) 'Q Observacion
+
+                .Cells(rowUID, 18).Value = Environ$("username")       'R CapturadoPor
+                .Cells(rowUID, 19).Value = Now                        'S FechaHora
+                .Cells(rowUID, 20).Value = "BORRADOR"                 'T Estatus
+
+                If UCase$(gLoc) = "CAP" Then
+                    .Cells(rowUID, 22).Value = txtBonoComedor.Value   'V Bono comedor
+                Else
+                    .Cells(rowUID, 22).Value = ""
+                End If
+            End With
+
+        End If
+
+NextI:
+    Next i
+
+    ' Proteger BD
+    On Error Resume Next
+    ws.Protect Password:="AVASA"
+    On Error GoTo 0
+
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    MsgBox "Incidencias guardadas/actualizadas.", vbInformation
+
+    ' Limpieza UI
+    LimpiarIncidencias
+    txtAdicional.Value = ""
+    txtObservaciones.Value = ""
+    On Error Resume Next
+    txtBonoComedor.Value = ""
+    On Error GoTo 0
+
+    txtNumEmpleado.Value = ""
+    txtUsuarioCars.Value = ""
+    txtDriverCars.Value = ""
+    txtPuesto.Value = ""
+    txtActividad.Value = ""
+    txtNombre.Value = ""
+
+    EnEdicion = False
+
+    modReporteIncidencias.GenerarMatrizPeriodoActual
+
+Salir:
+    If Err.Number <> 0 Then
+        Application.EnableEvents = True
+        Application.ScreenUpdating = True
+        MsgBox "Error al guardar: " & Err.Description, vbCritical
+    End If
+End Sub
+
+Private Sub LimpiarIncidencias()
+    Dim i As Long
+    For i = 1 To 16
+        If Me.Controls("cboDia" & i).Visible Then
+            Me.Controls("cboDia" & i).Value = ""
+        End If
+    Next i
+
+    On Error Resume Next
+    txtBonoComedor.Value = ""
+    On Error GoTo 0
+End Sub
+
+Private Function BuildUID(ByVal loc As String, ByVal numEmp As Long, ByVal anio As Long, _
+                          ByVal mes As Long, ByVal tipoPeriodo As String, ByVal Periodo As Long, _
+                          ByVal dia As Long) As String
+    BuildUID = UCase$(Trim$(loc)) & "|" & numEmp & "|" & anio & "|" & Format$(mes, "00") & "|" & _
+               UCase$(Trim$(tipoPeriodo)) & "|" & Periodo & "|" & dia
+End Function
+
+Private Function FindRowByUID(ByVal ws As Worksheet, ByVal uid As String) As Long
+    Dim lastRow As Long, i As Long
+    lastRow = ws.Cells(ws.Rows.Count, "W").End(xlUp).Row
+    For i = 2 To lastRow
+        If CStr(ws.Cells(i, "W").Value) = uid Then
+            FindRowByUID = i
+            Exit Function
+        End If
+    Next i
+    FindRowByUID = 0
+End Function
+
+Private Function GetNextID(ByVal ws As Worksheet) As Long
+    'IDRegistro = columna U (21)
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, "U").End(xlUp).Row
+
+    If lastRow < 2 Or ws.Cells(lastRow, "U").Value = "" Then
+        GetNextID = 1
+    Else
+        GetNextID = CLng(ws.Cells(lastRow, "U").Value) + 1
+    End If
+End Function
+
+'===================================================
+'  CERRAR
+'===================================================
+Private Sub cmdCerrar_Click()
+    Unload Me
+End Sub
+
+
+
+
+========================================
+COMPONENTE: frmMenuPrincipal
+TIPO: 3
+========================================
+Option Explicit
+
+Private minAnio As Long          ' Primer año con registros
+Private mesesNombres As Variant  ' Array con nombres de meses
+
+
+
+'====================================================
+'  INICIALIZAR MENÚ PRINCIPAL
+'====================================================
+
+Private Sub UserForm_Initialize()
+
+    Dim ws As Worksheet
+    Dim ultFila As Long
+    Dim i As Long
+    Dim v As Variant
+    Dim anioActual As Long
+
+    '---------------------------------
+    ' 0) Locación fija (ya viene de Workbook_Open)
+    '---------------------------------
+    Me.lblLocacion.caption = gLocDisplay
+
+    ' Si NO es template y no hay locación, no puede seguir
+    If Not gIsTemplate Then
+        If Len(Trim$(gLoc)) = 0 Or Len(Trim$(gLocDisplay)) = 0 Then
+            MsgBox "Este archivo no tiene locación configurada (Config).", vbCritical
+            Unload Me
+            Exit Sub
+        End If
+    End If
+
+    '---------------------------------
+    ' 1) Determinar primer año en BDIncidencias_Local (col I = Año)
+    '---------------------------------
+    anioActual = Year(Date)
+    minAnio = anioActual
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("BDIncidencias_Local")
+    On Error GoTo 0
+
+    If Not ws Is Nothing Then
+        ultFila = ws.Cells(ws.Rows.Count, "I").End(xlUp).Row
+        If ultFila >= 2 Then
+            For i = 2 To ultFila
+                v = ws.Cells(i, "I").Value
+                If IsNumeric(v) Then
+                    If CLng(v) < minAnio Then minAnio = CLng(v)
+                End If
+            Next i
+        End If
+    End If
+
+    '---------------------------------
+    ' 2) Llenar Años
+    '---------------------------------
+    cboAnio.Clear
+    For i = minAnio To anioActual
+        cboAnio.AddItem i
+    Next i
+
+    '---------------------------------
+    ' 3) Meses
+    '---------------------------------
+    mesesNombres = Array("ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", _
+                         "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE")
+
+    '---------------------------------
+    ' 4) Tipo de periodo
+    '---------------------------------
+    cboTipoPeriodo.Clear
+    cboTipoPeriodo.AddItem "Semanal"
+    cboTipoPeriodo.AddItem "Quincenal"
+
+    cboMes.Clear
+    cboPeriodo.Clear
+
+End Sub
+
+
+'====================================================
+'  CAMBIO DE AÑO -> ACTUALIZAR MESES
+'====================================================
+Private Sub cboAnio_Change()
+
+    Dim anioSel As Long
+    Dim anioActual As Long
+    Dim mesLimite As Long
+    Dim i As Long
+
+    If cboAnio.Value = "" Then Exit Sub
+    If Not IsNumeric(cboAnio.Value) Then Exit Sub
+
+    anioSel = CLng(cboAnio.Value)
+    anioActual = Year(Date)
+
+    If anioSel < anioActual Then
+        mesLimite = 12
+    ElseIf anioSel = anioActual Then
+        mesLimite = Month(Date)
+    Else
+        Exit Sub
+    End If
+
+    cboMes.Clear
+    For i = 0 To mesLimite - 1
+        cboMes.AddItem UCase$(Format$(DateSerial(anioSel, i + 1, 1), "mmmm"))
+    Next i
+
+    cboTipoPeriodo.Value = ""
+    cboPeriodo.Clear
+
+End Sub
+
+'====================================================
+'  CAMBIO DE MES / TIPO PERIODO -> ACTUALIZAR PERIODOS
+'====================================================
+Private Sub cboMes_Change()
+    ActualizarPeriodos
+End Sub
+
+Private Sub cboTipoPeriodo_Change()
+    ActualizarPeriodos
+End Sub
+
+Private Sub ActualizarPeriodos()
+    Dim anioSel As Long, mesSel As Long
+    Dim anioAct As Long, mesAct As Long, diaHoy As Long
+    Dim maxPeriodo As Long
+    Dim i As Long
+
+    cboPeriodo.Clear
+
+    If cboAnio.Value = "" Or cboMes.Value = "" Or cboTipoPeriodo.Value = "" Then Exit Sub
+
+    anioSel = CLng(cboAnio.Value)
+    mesSel = cboMes.ListIndex + 1
+
+    anioAct = Year(Date)
+    mesAct = Month(Date)
+    diaHoy = Day(Date)
+
+    Select Case UCase$(cboTipoPeriodo.Value)
+
+        Case "QUINCENAL"
+            If (anioSel < anioAct) Or (anioSel = anioAct And mesSel < mesAct) Then
+                maxPeriodo = 2
+            ElseIf anioSel = anioAct And mesSel = mesAct Then
+                If diaHoy <= 15 Then
+                    maxPeriodo = 1
+                Else
+                    maxPeriodo = 2
+                End If
+            Else
+                Exit Sub
+            End If
+
+        Case "SEMANAL"
+            If (anioSel < anioAct) Or (anioSel = anioAct And mesSel < mesAct) Then
+                maxPeriodo = 4
+            ElseIf anioSel = anioAct And mesSel = mesAct Then
+                Select Case diaHoy
+                    Case 1 To 7:   maxPeriodo = 1
+                    Case 8 To 14:  maxPeriodo = 2
+                    Case 15 To 21: maxPeriodo = 3
+                    Case Else:     maxPeriodo = 4
+                End Select
+            Else
+                Exit Sub
+            End If
+
+    End Select
+
+    For i = 1 To maxPeriodo
+        cboPeriodo.AddItem i
+    Next i
+End Sub
+
+'====================================================
+'  ACEPTAR -> FIJAR GLOBALES, GENERAR MATRIZ Y MOSTRARLA
+'====================================================
+Private Sub cmdAceptar_Click()
+
+    If gLoc = "" Or _
+       cboAnio.Value = "" Or cboMes.Value = "" Or _
+       cboTipoPeriodo.Value = "" Or cboPeriodo.Value = "" Then
+        MsgBox "Selecciona año, mes, tipo y periodo.", vbExclamation
+        Exit Sub
+    End If
+
+    gAnio = CLng(cboAnio.Value)
+    gMes = cboMes.ListIndex + 1
+    gTipoPeriodo = cboTipoPeriodo.Value
+    gPeriodo = CLng(cboPeriodo.Value)
+
+    '=============================
+    ' 1) Sync empleados (solo 1 vez por periodo)
+    '=============================
+    Dim pid As String
+    pid = modEmpleadosSync.BuildPeriodID(gAnio, gMes, gTipoPeriodo, gPeriodo)
+
+    'False = NO fuerza; si ya se sincronizó ese periodo, no vuelve a tocarlo
+    modEmpleadosSync.SyncEmpleados_PeriodoActual pid, False
+
+    '=============================
+    ' 2) Generar matriz del periodo
+    '=============================
+    modReporteIncidencias.GenerarMatrizPeriodoActual
+    Unload Me
+
+End Sub
+
+
+'====================================================
+'  CERRAR MENÚ
+'====================================================
+Private Sub cmdCerrar_Click()
+    Unload Me
+End Sub
+
+
+
+
+========================================
+COMPONENTE: Hoja2
+TIPO: 100
+========================================
+
+
+========================================
+COMPONENTE: Hoja4
+TIPO: 100
+========================================
+
+
+========================================
+COMPONENTE: ModGlobal
+TIPO: 1
+========================================
+Option Explicit
+
+Public gAnio As Long
+Public gMes As Long
+Public gTipoPeriodo As String
+Public gPeriodo As Long
+Public gLoc As String           'código de locación (GRUPO: CUU, CAP, etc.)
+Public gLocDisplay As String
+Public gIsTemplate As Boolean
+
+
+
+========================================
+COMPONENTE: modReporteIncidencias
+TIPO: 1
+========================================
+Option Explicit
+
+' gLoc, gAnio, gMes, gTipoPeriodo, gPeriodo
+' vienen de modGlobal
+
+
+'====================================================
+' 1. Nombre de la hoja de matriz del periodo actual
+'====================================================
+Private Function NombreHojaMatriz() As String
+    Dim sufTipo As String
+    Dim nombre As String
+    
+    If UCase$(gTipoPeriodo) = "SEMANAL" Then
+        sufTipo = "S" & gPeriodo
+    Else
+        sufTipo = "Q" & gPeriodo
+    End If
+    
+    'Ejemplo base: M_CUU_2025_12_Q1
+    nombre = "M_" & gLoc & "_" & gAnio & "_" & _
+             Format$(gMes, "00") & "_" & sufTipo
+             
+    'Por si algún día gLoc trae algo largo (ej. "CANCUN_AEROPUERTO")
+    If Len(nombre) > 31 Then
+        nombre = Left$(nombre, 31)
+    End If
+    
+    NombreHojaMatriz = nombre
+End Function
+
+
+'====================================================
+' 2. Obtener (o crear) la hoja de matriz del periodo
+'====================================================
+Private Function GetHojaMatrizPeriodo() As Worksheet
+    Dim ws As Worksheet
+    Dim nombre As String
+    
+    nombre = NombreHojaMatriz()
+    
+    '¿Ya existe la hoja?
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(nombre)
+    On Error GoTo 0
+    
+    If ws Is Nothing Then
+        
+        'Si la estructura del libro está protegida, no se pueden agregar hojas
+        If ThisWorkbook.ProtectStructure Then
+            MsgBox "No se puede crear la hoja de matriz '" & nombre & "' porque " & _
+                   "la estructura del libro está protegida." & vbCrLf & vbCrLf & _
+                   "Desprotege el libro (Revisar > Proteger libro) y vuelve a intentar.", _
+                   vbCritical
+            Set GetHojaMatrizPeriodo = Nothing
+            Exit Function
+        End If
+        
+        'Crear hoja al final
+        On Error GoTo ErrCrear
+        Set ws = ThisWorkbook.Worksheets.Add( _
+                    After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        ws.Name = nombre
+        On Error GoTo 0
+    End If
+    
+    '?? IMPORTANTE: asegurarnos de que la hoja esté visible
+    ws.Visible = xlSheetVisible
+    
+    Set GetHojaMatrizPeriodo = ws
+    Exit Function
+
+ErrCrear:
+    MsgBox "Error al crear la hoja de matriz '" & nombre & "'." & vbCrLf & _
+           "Detalle: " & Err.Description, vbCritical
+    Set GetHojaMatrizPeriodo = Nothing
+End Function
+
+
+'====================================================
+' 3. Rango (primer y último día) del periodo
+'====================================================
+Private Sub GetRangoPeriodo( _
+        ByVal anio As Long, _
+        ByVal mes As Long, _
+        ByVal tipoPeriodo As String, _
+        ByVal numPeriodo As Long, _
+        ByRef diaIni As Long, _
+        ByRef diaFin As Long)
+
+    Dim uDia As Long
+    uDia = Day(DateSerial(anio, mes + 1, 0))
+
+    Select Case UCase$(tipoPeriodo)
+
+        Case "SEMANAL"
+            Select Case numPeriodo
+                Case 1: diaIni = 1:  diaFin = 7
+                Case 2: diaIni = 8:  diaFin = 14
+                Case 3: diaIni = 15: diaFin = 21
+                Case 4: diaIni = 22: diaFin = uDia
+            End Select
+
+        Case "QUINCENAL"
+            Select Case numPeriodo
+                Case 1: diaIni = 1:  diaFin = 15
+                Case 2: diaIni = 16: diaFin = uDia
+            End Select
+
+    End Select
+
+End Sub
+
+
+'====================================================
+' 4. Buscar CódigoInc en BDIncidencias_Local
+'    para un empleado / día / periodo actual
+'====================================================
+Private Function BuscarCodigoInc( _
+        ByVal numEmp As Long, _
+        ByVal dia As Long) As String
+
+    Dim ws As Worksheet
+    Dim ultFila As Long
+    Dim i As Long
+
+    Set ws = ThisWorkbook.Worksheets("BDIncidencias_Local")
+    ultFila = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    For i = 2 To ultFila
+        If ws.Cells(i, "A").Value = gLoc And _
+           ws.Cells(i, "C").Value = numEmp And _
+           ws.Cells(i, "I").Value = gAnio And _
+           ws.Cells(i, "J").Value = gMes And _
+           ws.Cells(i, "K").Value = gTipoPeriodo And _
+           ws.Cells(i, "L").Value = gPeriodo And _
+           ws.Cells(i, "M").Value = dia Then
+            
+            BuscarCodigoInc = CStr(ws.Cells(i, "O").Value) 'CodigoInc col O
+            Exit Function
+        End If
+    Next i
+
+    BuscarCodigoInc = ""
+End Function
+
+
+'====================================================
+' 5. Obtener Adicional, Observaciones y Bono comedor
+'    en el periodo actual (primer valor no vacío)
+'====================================================
+Private Sub ObtenerAdicionalYObs( _
+        ByVal numEmp As Long, _
+        ByRef adicional As String, _
+        ByRef obs As String, _
+        Optional ByRef bonoComedor As Variant)
+
+    Dim ws As Worksheet
+    Dim ultFila As Long
+    Dim i As Long
+
+    adicional = ""
+    obs = ""
+    bonoComedor = Empty
+
+    Set ws = ThisWorkbook.Worksheets("BDIncidencias_Local")
+    ultFila = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    For i = 2 To ultFila
+        If ws.Cells(i, "A").Value = gLoc And _
+           ws.Cells(i, "C").Value = numEmp And _
+           ws.Cells(i, "I").Value = gAnio And _
+           ws.Cells(i, "J").Value = gMes And _
+           ws.Cells(i, "K").Value = gTipoPeriodo And _
+           ws.Cells(i, "L").Value = gPeriodo Then
+
+            If adicional = "" Then adicional = CStr(ws.Cells(i, "P").Value) 'Adicional
+            If obs = "" Then obs = CStr(ws.Cells(i, "Q").Value)            'Observacion
+
+            ' Bono comedor en columna 22 (V), primer valor no vacío
+            If IsEmpty(bonoComedor) Or bonoComedor = "" Then
+                bonoComedor = ws.Cells(i, 22).Value
+            End If
+            
+            If adicional <> "" And obs <> "" And _
+               Not (IsEmpty(bonoComedor) Or bonoComedor = "") Then Exit For
+        End If
+    Next i
+End Sub
+
+
+'====================================================
+' 6. ¿Ya existen incidencias para este empleado / periodo?
+'====================================================
+Public Function ExisteIncidenciasEmpleadoPeriodo(ByVal numEmp As Long) As Boolean
+
+    Dim ws As Worksheet
+    Dim ultFila As Long
+    Dim i As Long
+
+    Set ws = ThisWorkbook.Worksheets("BDIncidencias_Local")
+    ultFila = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    For i = 2 To ultFila
+        If ws.Cells(i, 1).Value = gLoc _
+           And ws.Cells(i, 3).Value = numEmp _
+           And ws.Cells(i, 9).Value = gAnio _
+           And ws.Cells(i, 10).Value = gMes _
+           And ws.Cells(i, 11).Value = gTipoPeriodo _
+           And ws.Cells(i, 12).Value = gPeriodo Then
+
+            ExisteIncidenciasEmpleadoPeriodo = True
+            Exit Function
+        End If
+    Next i
+
+End Function
+
+
+'====================================================
+' 7. Borrar TODAS las incidencias del empleado / periodo
+'====================================================
+Public Sub BorrarIncidenciasEmpleadoPeriodo(ByVal numEmp As Long)
+
+    Dim ws As Worksheet
+    Dim ultFila As Long
+    Dim i As Long
+
+    Set ws = ThisWorkbook.Worksheets("BDIncidencias_Local")
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    ' Asegurar que la hoja NO esté protegida
+    On Error Resume Next
+    ws.Unprotect "AVASA"
+    ws.Unprotect "IncidenciasAVASA"   'por si quedó con la vieja
+    On Error GoTo 0
+
+    ultFila = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    'Borrar de abajo hacia arriba
+    For i = ultFila To 2 Step -1
+        If ws.Cells(i, 1).Value = gLoc _
+           And ws.Cells(i, 3).Value = numEmp _
+           And ws.Cells(i, 9).Value = gAnio _
+           And ws.Cells(i, 10).Value = gMes _
+           And ws.Cells(i, 11).Value = gTipoPeriodo _
+           And ws.Cells(i, 12).Value = gPeriodo Then
+
+            ws.Rows(i).Delete
+        End If
+    Next i
+
+    ' Si quieres que la BD quede protegida:
+    On Error Resume Next
+    ws.Protect Password:="AVASA"
+    On Error GoTo 0
+
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+End Sub
+
+'====================================================
+' 8. Crear / actualizar un botón (shape) en la hoja
+'====================================================
+Private Sub CrearOBoton( _
+        ByVal ws As Worksheet, _
+        ByVal nombre As String, _
+        ByVal texto As String, _
+        ByVal macro As String, _
+        ByVal col As Long)
+
+    Dim sh As Shape
+    Dim leftPos As Double, topPos As Double
+    Dim ancho As Double, alto As Double
+
+    'Buscar si ya existe el botón
+    On Error Resume Next
+    Set sh = ws.Shapes(nombre)
+    On Error GoTo 0
+
+    'Altura fija de la primera fila
+    ws.Rows(1).RowHeight = 37.5
+
+    'Posición y tamaño dentro de la columna indicada
+    leftPos = ws.Columns(col).Left + 3
+    topPos = ws.Rows(1).Top + 2
+    ancho = ws.Columns(col).Width - 6
+    alto = ws.Rows(1).Height - 12
+
+    If ancho < 40 Then ancho = 40
+    If alto < 18 Then alto = 18
+
+    'Crear o actualizar el shape
+    If sh Is Nothing Then
+        Set sh = ws.Shapes.AddShape(msoShapeRoundedRectangle, leftPos, topPos, ancho, alto)
+        sh.Name = nombre
+    Else
+        sh.Left = leftPos
+        sh.Top = topPos
+        sh.Width = ancho
+        sh.Height = alto
+    End If
+
+    'Formato del botón
+    With sh
+        'Texto centrado usando TextFrame (no TextFrame2)
+        .TextFrame.Characters.Text = texto
+        .TextFrame.HorizontalAlignment = xlHAlignCenter
+        .TextFrame.VerticalAlignment = xlVAlignCenter
+
+        'Macro asignada
+        .OnAction = macro
+
+        'Estilo visual
+        .Fill.ForeColor.RGB = RGB(0, 102, 153)
+        .Line.ForeColor.RGB = RGB(0, 51, 102)
+        .TextFrame.Characters.Font.Color = RGB(255, 255, 255)
+        .TextFrame.Characters.Font.Size = 10
+    End With
+
+End Sub
+'====================================================
+' 9. Generar / actualizar matriz del periodo actual
+'    SIEMPRE desde Empleados (todos los de la locación)
+'    y overlay de códigos desde BDIncidencias_Local
+'====================================================
+Public Sub GenerarMatrizPeriodoActual()
+
+    Dim wsMat As Worksheet
+    Dim wsBD As Worksheet
+    Dim wsEmp As Worksheet
+
+    Dim diaIni As Long, diaFin As Long, numDias As Long
+    Dim baseColDias As Long, lastDiaCol As Long
+    Dim colAdic As Long, colObs As Long, colBono As Long
+    Dim lastHeaderCol As Long
+
+    Dim fIni As Date, fFin As Date, mesNombre As String, titulo As String
+
+    Dim dictCod As Object, dictAdic As Object, dictObs As Object, dictBono As Object
+
+    Dim lastEmpRow As Long, r As Long, filaOut As Long
+    Dim numEmp As Long, d As Long, k As String, cod As String
+    Dim adicional As String, obs As String, bono As Variant
+    Dim empGrupo As String
+
+    '----------------------------------------
+    ' Validación de globals
+    '----------------------------------------
+    If gLoc = "" Or gAnio = 0 Or gMes = 0 Or gTipoPeriodo = "" Or gPeriodo = 0 Then
+        MsgBox "Falta definir locación o periodo. Entra por el menú.", vbCritical
+        Exit Sub
+    End If
+
+    Set wsBD = ThisWorkbook.Worksheets("BDIncidencias_Local")
+    Set wsEmp = ThisWorkbook.Worksheets("Empleados")
+    Set wsMat = GetHojaMatrizPeriodo()
+    If wsMat Is Nothing Then Exit Sub
+
+    '----------------------------------------
+    ' Botones fila 1 (si quieres)
+    '----------------------------------------
+    CrearOBoton wsMat, "btnAgregarIncidencia", "Agregar", "'" & ThisWorkbook.Name & "'!modReporteIncidencias.BotonAgregarIncidencia", 1
+    CrearOBoton wsMat, "btnEditarIncidencia", "Editar", "'" & ThisWorkbook.Name & "'!modReporteIncidencias.BotonEditarIncidencia", 2
+    CrearOBoton wsMat, "btnEliminarIncidencia", "Eliminar", "'" & ThisWorkbook.Name & "'!modReporteIncidencias.BotonEliminarIncidencia", 3
+    CrearOBoton wsMat, "btnMenuIncidencias", "Menú", "'" & ThisWorkbook.Name & "'!modReporteIncidencias.BotonMenuPrincipal", 4
+
+    '----------------------------------------
+    ' Rango de días y título
+    '----------------------------------------
+    GetRangoPeriodo gAnio, gMes, gTipoPeriodo, gPeriodo, diaIni, diaFin
+    numDias = diaFin - diaIni + 1
+
+    baseColDias = 9 ' I
+    lastDiaCol = baseColDias + numDias - 1
+
+    fIni = DateSerial(gAnio, gMes, diaIni)
+    fFin = DateSerial(gAnio, gMes, diaFin)
+    mesNombre = UCase$(Format$(fIni, "mmmm"))
+
+    titulo = "Incidencias AVASA " & LCase$(gTipoPeriodo) & " " & _
+             Format$(fIni, "dd") & "-" & Format$(fFin, "dd") & " " & _
+             mesNombre & " " & gAnio
+
+    '----------------------------------------
+    ' Limpiar matriz (dejando fila 1)
+    '----------------------------------------
+    With wsMat
+        .Rows("2:2000").ClearContents
+        .Rows("2:2000").Interior.ColorIndex = xlNone
+        .Rows("2:2000").Borders.LineStyle = xlNone
+
+        .Rows(1).RowHeight = 30
+        .Rows(1).UnMerge
+
+        If lastDiaCol < 6 Then lastDiaCol = 6
+
+        .Range(.Cells(1, 6), .Cells(1, lastDiaCol)).Merge
+        With .Range("F1")
+            .Value = titulo
+            .HorizontalAlignment = xlCenter
+            .VerticalAlignment = xlCenter
+            .Font.Bold = True
+            .Font.Size = 14
+        End With
+
+        'Encabezados
+        .Range("A2").Value = "GRUPO"
+        .Range("B2").Value = "CIUDAD"
+        .Range("C2").Value = "NumeroEmpleado"
+        .Range("D2").Value = "UsuarioCARs+"
+        .Range("E2").Value = "DriverCARs+"
+        .Range("F2").Value = "Puesto"
+        .Range("G2").Value = "Actividad"
+        .Range("H2").Value = "Nombre"
+
+        For d = 0 To numDias - 1
+            .Cells(2, baseColDias + d).Value = diaIni + d
+        Next d
+
+        colAdic = baseColDias + numDias
+        colObs = colAdic + 1
+
+        .Cells(2, colAdic).Value = "Adicional"
+        .Cells(2, colObs).Value = "Observaciones"
+
+        If UCase$(gLoc) = "CAP" Then
+            colBono = colObs + 1
+            .Cells(2, colBono).Value = "Bono comedor"
+        Else
+            colBono = 0
+        End If
+
+        lastHeaderCol = IIf(colBono > 0, colBono, colObs)
+
+        With .Range(.Cells(2, 1), .Cells(2, lastHeaderCol))
+            .Interior.Color = RGB(240, 200, 80)
+            .Font.Bold = True
+            .HorizontalAlignment = xlCenter
+            .Borders.LineStyle = xlContinuous
+        End With
+
+        .Columns("A:H").ColumnWidth = 12
+        For d = baseColDias To lastDiaCol
+            .Columns(d).ColumnWidth = 3
+        Next d
+        .Columns(colAdic).ColumnWidth = 12
+        .Columns(colObs).ColumnWidth = 18
+        If colBono > 0 Then .Columns(colBono).ColumnWidth = 14
+    End With
+
+    '----------------------------------------
+    ' Diccionarios desde BD (solo periodo actual)
+    '----------------------------------------
+    Set dictCod = CreateObject("Scripting.Dictionary")   ' key: emp|dia  -> codigo
+    Set dictAdic = CreateObject("Scripting.Dictionary")  ' key: emp      -> adicional
+    Set dictObs = CreateObject("Scripting.Dictionary")   ' key: emp      -> obs
+    Set dictBono = CreateObject("Scripting.Dictionary")  ' key: emp      -> bono
+
+    Dim ultFilaBD As Long, i As Long
+    Dim diaBD As Long, empBD As Long
+
+    ultFilaBD = wsBD.Cells(wsBD.Rows.Count, "A").End(xlUp).Row
+
+    For i = 2 To ultFilaBD
+        If wsBD.Cells(i, "A").Value = gLoc _
+           And wsBD.Cells(i, "I").Value = gAnio _
+           And wsBD.Cells(i, "J").Value = gMes _
+           And UCase$(CStr(wsBD.Cells(i, "K").Value)) = UCase$(CStr(gTipoPeriodo)) _
+           And wsBD.Cells(i, "L").Value = gPeriodo Then
+
+            empBD = CLng(wsBD.Cells(i, "C").Value)
+            diaBD = DiaAsLong(wsBD.Cells(i, "M").Value)
+
+            If diaBD >= diaIni And diaBD <= diaFin Then
+                k = CStr(empBD) & "|" & CStr(diaBD)
+                cod = modCatalogoIncidencias.CanonizarCodigo(CStr(wsBD.Cells(i, "O").Value))
+                dictCod(k) = cod
+            End If
+
+            If Not dictAdic.Exists(CStr(empBD)) Then
+                If Len(Trim$(CStr(wsBD.Cells(i, "P").Value))) > 0 Then dictAdic(CStr(empBD)) = CStr(wsBD.Cells(i, "P").Value)
+            End If
+
+            If Not dictObs.Exists(CStr(empBD)) Then
+                If Len(Trim$(CStr(wsBD.Cells(i, "Q").Value))) > 0 Then dictObs(CStr(empBD)) = CStr(wsBD.Cells(i, "Q").Value)
+            End If
+
+            If colBono > 0 Then
+                If Not dictBono.Exists(CStr(empBD)) Then
+                    If Len(Trim$(CStr(wsBD.Cells(i, 22).Value))) > 0 Then dictBono(CStr(empBD)) = wsBD.Cells(i, 22).Value
+                End If
+            End If
+        End If
+    Next i
+
+    '----------------------------------------
+    ' Pintar matriz SIEMPRE desde Empleados (todos locación)
+    '----------------------------------------
+    lastEmpRow = wsEmp.Cells(wsEmp.Rows.Count, "A").End(xlUp).Row
+    filaOut = 3
+
+    For r = 2 To lastEmpRow
+        empGrupo = Trim$(CStr(wsEmp.Cells(r, "A").Value))
+        If UCase$(empGrupo) = UCase$(gLoc) Then
+
+            If IsNumeric(wsEmp.Cells(r, "C").Value) Then
+                numEmp = CLng(wsEmp.Cells(r, "C").Value)
+            Else
+                GoTo NextEmp
+            End If
+
+            wsMat.Cells(filaOut, 1).Value = wsEmp.Cells(r, "A").Value
+            wsMat.Cells(filaOut, 2).Value = wsEmp.Cells(r, "B").Value
+            wsMat.Cells(filaOut, 3).Value = numEmp
+            wsMat.Cells(filaOut, 4).Value = wsEmp.Cells(r, "D").Value
+            wsMat.Cells(filaOut, 5).Value = wsEmp.Cells(r, "E").Value
+            wsMat.Cells(filaOut, 6).Value = wsEmp.Cells(r, "F").Value
+            wsMat.Cells(filaOut, 7).Value = wsEmp.Cells(r, "G").Value
+            wsMat.Cells(filaOut, 8).Value = wsEmp.Cells(r, "H").Value
+
+            'Overlay de códigos por día desde BD
+            For d = diaIni To diaFin
+                k = CStr(numEmp) & "|" & CStr(d)
+                If dictCod.Exists(k) Then
+                    cod = CStr(dictCod(k))
+                    If Len(cod) > 0 Then wsMat.Cells(filaOut, baseColDias + (d - diaIni)).Value = cod
+                End If
+            Next d
+
+            'Adic/Obs/Bono
+            adicional = ""
+            obs = ""
+            bono = Empty
+
+            If dictAdic.Exists(CStr(numEmp)) Then adicional = dictAdic(CStr(numEmp))
+            If dictObs.Exists(CStr(numEmp)) Then obs = dictObs(CStr(numEmp))
+            If colBono > 0 Then
+                If dictBono.Exists(CStr(numEmp)) Then bono = dictBono(CStr(numEmp))
+            End If
+
+            wsMat.Cells(filaOut, colAdic).Value = adicional
+            wsMat.Cells(filaOut, colObs).Value = obs
+            If colBono > 0 Then wsMat.Cells(filaOut, colBono).Value = bono
+
+            filaOut = filaOut + 1
+        End If
+
+NextEmp:
+    Next r
+
+    wsMat.Activate
+    wsMat.Range("A1").Select
+
+    If filaOut = 3 Then
+        MsgBox "No encontré empleados en la hoja Empleados para la locación " & gLoc & ".", vbInformation
+    End If
+
+End Sub
+
+
+
+
+'====================================================
+' 10. Botón "Agregar incidencia" en la matriz
+'====================================================
+Public Sub BotonAgregarIncidencia()
+    On Error GoTo Salir
+    If Not SetGlobalsDesdeHojaMatriz(ActiveSheet) Then
+    MsgBox "Esta hoja no parece ser una matriz válida (M_LOC_AAAA_MM_Q#/S#).", vbExclamation
+    Exit Sub
+End If
+    modSeguridadIncidencias.ValidarPeriodoAbiertoOrExit
+
+    Load frmIncidencias
+    frmIncidencias.EnEdicion = False
+    frmIncidencias.Show
+
+Salir:
+    If Err.Number <> 0 Then Exit Sub
+End Sub
+
+'====================================================
+' 11. Botón "Editar incidencia" en la matriz
+'====================================================
+Public Sub BotonEditarIncidencia()
+
+On Error GoTo Salir
+If Not SetGlobalsDesdeHojaMatriz(ActiveSheet) Then
+    MsgBox "Esta hoja no parece ser una matriz válida (M_LOC_AAAA_MM_Q#/S#).", vbExclamation
+    Exit Sub
+End If
+modSeguridadIncidencias.ValidarPeriodoAbiertoOrExit
+    Dim ws As Worksheet
+    Dim fila As Long
+    Dim numEmp As Long
+    
+    Set ws = ActiveSheet
+    fila = ActiveCell.Row
+    
+    If fila < 3 Then
+        MsgBox "Selecciona primero la fila del empleado que quieres editar.", vbExclamation
+        Exit Sub
+    End If
+    
+    If ws.Cells(fila, 3).Value = "" Then
+        MsgBox "La fila seleccionada no contiene número de empleado.", vbExclamation
+        Exit Sub
+    End If
+    
+    If Not IsNumeric(ws.Cells(fila, 3).Value) Then
+        MsgBox "El número de empleado de la fila seleccionada no es válido.", vbExclamation
+        Exit Sub
+    End If
+    
+    numEmp = CLng(ws.Cells(fila, 3).Value)
+    
+    Load frmIncidencias
+    frmIncidencias.CargarDesdeBD numEmp
+    frmIncidencias.Show
+    
+Salir:
+If Err.Number <> 0 Then Exit Sub
+
+
+
+End Sub
+
+
+'====================================================
+' 12. Botón "Eliminar incidencia" en la matriz
+'====================================================
+Public Sub BotonEliminarIncidencia()
+On Error GoTo Salir
+If Not SetGlobalsDesdeHojaMatriz(ActiveSheet) Then
+    MsgBox "Esta hoja no parece ser una matriz válida (M_LOC_AAAA_MM_Q#/S#).", vbExclamation
+    Exit Sub
+End If
+modSeguridadIncidencias.ValidarPeriodoAbiertoOrExit
+    Dim ws As Worksheet
+    Dim fila As Long
+    Dim numEmp As Long
+    Dim resp As VbMsgBoxResult
+    
+    Set ws = ActiveSheet
+    fila = ActiveCell.Row
+    
+    If fila < 3 Then
+        MsgBox "Selecciona primero la fila del empleado que quieres eliminar.", vbExclamation
+        Exit Sub
+    End If
+    
+    If ws.Cells(fila, 3).Value = "" Then
+        MsgBox "La fila seleccionada no contiene número de empleado.", vbExclamation
+        Exit Sub
+    End If
+    
+    If Not IsNumeric(ws.Cells(fila, 3).Value) Then
+        MsgBox "El número de empleado de la fila seleccionada no es válido.", vbExclamation
+        Exit Sub
+    End If
+    
+    numEmp = CLng(ws.Cells(fila, 3).Value)
+    
+    If Not ExisteIncidenciasEmpleadoPeriodo(numEmp) Then
+        MsgBox "No hay incidencias registradas para este empleado en el periodo actual.", vbInformation
+        Exit Sub
+    End If
+    
+    resp = MsgBox( _
+        "Se eliminarán TODAS las incidencias de este empleado " & vbCrLf & _
+        "para la locación y periodo actuales." & vbCrLf & vbCrLf & _
+        "¿Deseas continuar?", _
+        vbQuestion + vbYesNo + vbDefaultButton2, "Eliminar incidencias")
+    
+    If resp = vbNo Then Exit Sub
+    
+    BorrarIncidenciasEmpleadoPeriodo numEmp
+    GenerarMatrizPeriodoActual
+Salir:
+If Err.Number <> 0 Then Exit Sub
+End Sub
+
+
+'====================================================
+' 13. Botón "Menú" en la matriz
+'====================================================
+Public Sub BotonMenuPrincipal()
+
+    'Opcional: activar hoja "Menu" si existe
+    On Error Resume Next
+    ThisWorkbook.Worksheets("Menu").Activate
+    On Error GoTo 0
+
+    'Mostrar el menú principal
+    frmMenuPrincipal.Show
+
+End Sub
+
+Private Function DiaAsLong(ByVal v As Variant) As Long
+    On Error GoTo Fail
+
+    If IsError(v) Or IsEmpty(v) Then GoTo Fail
+
+    If IsDate(v) Then
+        DiaAsLong = Day(CDate(v))
+        Exit Function
+    End If
+
+    If IsNumeric(v) Then
+        DiaAsLong = CLng(v)
+        Exit Function
+    End If
+
+Fail:
+    DiaAsLong = 0
+End Function
+
+Private Function SetGlobalsDesdeHojaMatriz(ByVal ws As Worksheet) As Boolean
+    On Error GoTo Fail
+
+    Dim p() As String, tipoTag As String
+
+    If ws Is Nothing Then GoTo Fail
+    If Left$(ws.Name, 2) <> "M_" Then GoTo Fail
+
+    p = Split(ws.Name, "_")
+    ' Esperado: M, LOC, YYYY, MM, Q1/S4
+    If UBound(p) < 4 Then GoTo Fail
+
+    gLoc = p(1)
+    gAnio = CLng(p(2))
+    gMes = CLng(p(3))
+
+    tipoTag = UCase$(p(4)) 'Q1 o S4
+    If Left$(tipoTag, 1) = "Q" Then
+        gTipoPeriodo = "QUINCENAL"
+        gPeriodo = CLng(Mid$(tipoTag, 2))
+    ElseIf Left$(tipoTag, 1) = "S" Then
+        gTipoPeriodo = "SEMANAL"
+        gPeriodo = CLng(Mid$(tipoTag, 2))
+    Else
+        GoTo Fail
+    End If
+
+    SetGlobalsDesdeHojaMatriz = True
+    Exit Function
+
+Fail:
+    SetGlobalsDesdeHojaMatriz = False
+End Function
+
+
+
+========================================
+COMPONENTE: Hoja6
+TIPO: 100
+========================================
+
+
+========================================
+COMPONENTE: Hoja3
+TIPO: 100
+========================================
+
+
+========================================
+COMPONENTE: Hoja7
+TIPO: 100
+========================================
+
+
+========================================
+COMPONENTE: modSeguridadIncidencias
+TIPO: 1
+========================================
+Option Explicit
+
+'==========================
+'  SEGURIDAD / PROTECCIÓN
+'==========================
+Public Const PASS As String = "AVASA"
+Public Const SECURITY_ON As Boolean = False   'DEV: False / RELEASE: True
+
+'Deja la hoja "editable para macros" (UserInterfaceOnly)
+'pero protegida contra edición manual (si SECURITY_ON=True)
+Public Sub EnsureSheetEditable(ByVal ws As Worksheet)
+    If Not SECURITY_ON Then Exit Sub
+
+    On Error Resume Next
+    ws.Unprotect Password:=PASS
+    ws.Protect Password:=PASS, _
+               UserInterfaceOnly:=True, _
+               AllowFiltering:=True, _
+               AllowSorting:=True
+    ws.EnableSelection = xlNoRestrictions
+    On Error GoTo 0
+End Sub
+
+'Protege una hoja de matriz (bloquea todo)
+Public Sub ProtegerHojaMatriz(ByVal ws As Worksheet)
+    If Not SECURITY_ON Then Exit Sub
+
+    On Error Resume Next
+    ws.Unprotect Password:=PASS
+    ws.Cells.Locked = True
+    ws.Cells.FormulaHidden = False
+    ws.Protect Password:=PASS, _
+               UserInterfaceOnly:=True, _
+               AllowFiltering:=True, _
+               AllowSorting:=True
+    ws.EnableSelection = xlNoRestrictions
+    On Error GoTo 0
+End Sub
+
+'Protege todas las hojas M_*
+Public Sub InicializarProtecciones()
+    If Not SECURITY_ON Then Exit Sub
+
+    Dim ws As Worksheet
+    For Each ws In ThisWorkbook.Worksheets
+        If Left$(ws.Name, 2) = "M_" Then ProtegerHojaMatriz ws
+    Next ws
+End Sub
+
+Public Sub UnprotectSheetIfExists(ByVal wb As Workbook, ByVal sheetName As String)
+    If Not SECURITY_ON Then Exit Sub
+    On Error Resume Next
+    wb.Worksheets(sheetName).Unprotect Password:=PASS
+    On Error GoTo 0
+End Sub
+
+Public Sub ProtectSheetIfExists(ByVal wb As Workbook, ByVal sheetName As String)
+    If Not SECURITY_ON Then Exit Sub
+    On Error Resume Next
+    wb.Worksheets(sheetName).Protect Password:=PASS, UserInterfaceOnly:=True
+    On Error GoTo 0
+End Sub
+
+'==========================
+'  CIERRE AUTOMÁTICO
+'==========================
+'Se considera "cerrado" cuando:
+'   Now >= FechaFinPeriodo + (LockWindowHours / 24)
+'LockWindowHours viene de Config (ej 48)
+
+Public Function GetLockWindowHours() As Double
+    'Default: 48 horas
+    Dim v As Variant
+    v = GetConfig("LockWindowHours", 48)
+
+    If IsNumeric(v) Then
+        GetLockWindowHours = CDbl(v)
+    Else
+        GetLockWindowHours = 48#
+    End If
+End Function
+
+Public Function GetFechaFinPeriodoActual() As Date
+    'Calcula fecha fin del periodo actual usando globals
+    'Requiere: gAnio, gMes, gTipoPeriodo, gPeriodo (modGlobal)
+    Dim diaIni As Long, diaFin As Long
+    diaIni = 0: diaFin = 0
+
+    Call ObtenerRangoPeriodo_Local(gAnio, gMes, gTipoPeriodo, gPeriodo, diaIni, diaFin)
+    GetFechaFinPeriodoActual = DateSerial(gAnio, gMes, diaFin)
+End Function
+
+Public Function GetFechaCierrePeriodoActual() As Date
+    GetFechaCierrePeriodoActual = GetFechaFinPeriodoActual() + (GetLockWindowHours() / 24#)
+End Function
+
+Public Function PeriodoActualEstaCerrado(Optional ByRef cierre As Date) As Boolean
+    cierre = GetFechaCierrePeriodoActual()
+    PeriodoActualEstaCerrado = (Now >= cierre)
+End Function
+
+Public Function PermiteEdicionPeriodo(Optional ByRef msgBloqueo As String) As Boolean
+    Dim cierre As Date
+
+    If PeriodoActualEstaCerrado(cierre) Then
+        msgBloqueo = "Periodo CERRADO." & vbCrLf & _
+                     "Cierre automático: " & Format$(cierre, "dd/mm/yyyy hh:mm") & vbCrLf & _
+                     "Si necesitas reabrir, solicítalo a Nómina."
+        PermiteEdicionPeriodo = False
+    Else
+        PermiteEdicionPeriodo = True
+    End If
+End Function
+
+Public Sub ValidarPeriodoAbiertoOrExit()
+    Dim m As String
+    If Not PermiteEdicionPeriodo(m) Then
+        MsgBox m, vbExclamation, "Bloqueo por cierre"
+        Err.Raise vbObjectError + 513, "modSeguridadIncidencias", "Periodo cerrado"
+    End If
+End Sub
+
+'Aplica el cierre a la hoja matriz:
+'- Si está abierto: quita protección (por si quedó protegida)
+'- Si está cerrado: protege (solo consulta)
+Public Sub AplicarCierreEnMatriz(ByVal wsMat As Worksheet)
+    Dim m As String
+
+    If wsMat Is Nothing Then Exit Sub
+
+    '--- PERIODO ABIERTO: quitar protección ---
+    If PermiteEdicionPeriodo(m) Then
+        On Error Resume Next
+        wsMat.Unprotect PASS
+        wsMat.EnableSelection = xlNoRestrictions
+        On Error GoTo 0
+        Exit Sub
+    End If
+
+    '--- PERIODO CERRADO: proteger hoja ---
+    On Error Resume Next
+    wsMat.Unprotect PASS
+    On Error GoTo 0
+
+    On Error Resume Next
+    wsMat.Cells.Locked = True
+    wsMat.Protect Password:=PASS, _
+                  UserInterfaceOnly:=True, _
+                  AllowFiltering:=True, _
+                  AllowSorting:=True
+    wsMat.EnableSelection = xlNoRestrictions
+    On Error GoTo 0
+End Sub
+
+'-----------------------------------------
+' Helper local: rango periodo
+'-----------------------------------------
+Private Sub ObtenerRangoPeriodo_Local( _
+        ByVal anio As Long, _
+        ByVal mes As Long, _
+        ByVal tipoPeriodo As String, _
+        ByVal numPeriodo As Long, _
+        ByRef diaIni As Long, _
+        ByRef diaFin As Long)
+
+    Dim uDia As Long
+    uDia = Day(DateSerial(anio, mes + 1, 0))
+
+    Select Case UCase$(tipoPeriodo)
+        Case "SEMANAL"
+            Select Case numPeriodo
+                Case 1: diaIni = 1:  diaFin = 7
+                Case 2: diaIni = 8:  diaFin = 14
+                Case 3: diaIni = 15: diaFin = 21
+                Case 4: diaIni = 22: diaFin = uDia
+            End Select
+
+        Case "QUINCENAL"
+            Select Case numPeriodo
+                Case 1: diaIni = 1:  diaFin = 15
+                Case 2: diaIni = 16: diaFin = uDia
+            End Select
+    End Select
+End Sub
+
+
+
+
+========================================
+COMPONENTE: Hoja8
+TIPO: 100
+========================================
+
+
+========================================
+COMPONENTE: modAdmin
+TIPO: 1
+========================================
+Option Explicit
+
+Public Sub BuscarMatrizPeriodoAdmin()
+
+    Dim codigo As String
+    Dim ws As Worksheet
+    Dim hojaEsperada As Worksheet
+    Dim lista() As String
+    Dim n As Long, i As Long
+    Dim msg As String
+    Dim resp As Variant
+    Dim nombreEsperado As String
+    
+    '------------------------------------
+    ' Pedir periodo: 2025_12_Q1, 2026_03_S2, etc.
+    '------------------------------------
+    codigo = InputBox( _
+        Prompt:="Pega el periodo con el formato:" & vbCrLf & _
+                "AAAA_MM_Q#  o  AAAA_MM_S#" & vbCrLf & _
+                "Ejemplo:  2025_12_Q1", _
+        Title:="Buscar matriz de incidencias")
+    
+    codigo = Trim(UCase$(codigo))
+    codigo = Replace(codigo, " ", "")
+    
+    If codigo = "" Then Exit Sub
+    
+    ' Validación muy ligera: 2 guiones bajos
+    If UBound(Split(codigo, "_")) <> 2 Then
+        MsgBox "El texto no parece un periodo válido (ej. 2025_12_Q1).", vbExclamation
+        Exit Sub
+    End If
+    
+    '------------------------------------
+    ' 1) Intento directo con el patrón "M_LOC_periodo"
+    '    (si el archivo está bien hecho, cada archivo solo tiene 1 LOC)
+    '------------------------------------
+    On Error Resume Next
+    If gLoc <> "" Then
+        nombreEsperado = "M_" & gLoc & "_" & codigo
+        Set hojaEsperada = ThisWorkbook.Worksheets(nombreEsperado)
+    End If
+    On Error GoTo 0
+    
+    If Not hojaEsperada Is Nothing Then
+        hojaEsperada.Visible = xlSheetVisible
+        hojaEsperada.Activate
+        Exit Sub
+    End If
+    
+    '------------------------------------
+    ' 2) Plan B: buscar cualquier hoja que termine en "_periodo"
+    '    Ej: * _2025_12_Q1
+    '------------------------------------
+    n = 0
+    For Each ws In ThisWorkbook.Worksheets
+        If UCase$(ws.Name) <> "MENU" Then
+            If ws.Name Like "*_" & codigo Then
+                n = n + 1
+                ReDim Preserve lista(1 To n)
+                lista(n) = ws.Name
+            End If
+        End If
+    Next ws
+    
+    Select Case n
+        Case 0
+            MsgBox "No se encontró ninguna hoja cuyo nombre termine en '" & codigo & "'.", _
+                   vbInformation
+            Exit Sub
+        
+        Case 1
+            Set hojaEsperada = ThisWorkbook.Worksheets(lista(1))
+            hojaEsperada.Visible = xlSheetVisible
+            hojaEsperada.Activate
+        
+        Case Else
+            ' Hay varias coincidencias, que elijas una
+            msg = "Se encontraron varias hojas con el periodo " & codigo & ":" & vbCrLf & vbCrLf
+            For i = 1 To n
+                msg = msg & i & ") " & lista(i) & vbCrLf
+            Next i
+            msg = msg & vbCrLf & "Escribe el número de la hoja a la que quieres ir:"
+            
+            resp = InputBox(msg, "Seleccionar hoja", "1")
+            If resp = "" Then Exit Sub
+            If Not IsNumeric(resp) Then
+                MsgBox "Valor no válido.", vbExclamation
+                Exit Sub
+            End If
+            i = CLng(resp)
+            If i < 1 Or i > n Then
+                MsgBox "El número no está en la lista.", vbExclamation
+                Exit Sub
+            End If
+            
+            Set hojaEsperada = ThisWorkbook.Worksheets(lista(i))
+            hojaEsperada.Visible = xlSheetVisible
+            hojaEsperada.Activate
+    End Select
+
+End Sub
+
+
+
+
+========================================
+COMPONENTE: Hoja1
+TIPO: 100
+========================================
+
+
+========================================
+COMPONENTE: modConfig
+TIPO: 1
+========================================
+Option Explicit
+
+'==========================
+' CONFIG: Get / Set por Key
+'==========================
+
+Public Function GetConfig(ByVal cfgKey As String, Optional ByVal defaultValue As String = "") As String
+    Dim lo As ListObject, r As ListRow
+    Set lo = ThisWorkbook.Worksheets("Config").ListObjects("tblConfig")
+
+    For Each r In lo.ListRows
+        If UCase$(Trim$(CStr(r.Range.Cells(1, 1).Value))) = UCase$(Trim$(cfgKey)) Then
+            GetConfig = CStr(r.Range.Cells(1, 2).Value)
+            Exit Function
+        End If
+    Next r
+
+    GetConfig = defaultValue
+End Function
+
+Public Sub SetConfig(ByVal cfgKey As String, ByVal cfgValue As String)
+    Dim lo As ListObject, r As ListRow
+    Set lo = ThisWorkbook.Worksheets("Config").ListObjects("tblConfig")
+
+    For Each r In lo.ListRows
+        If UCase$(Trim$(CStr(r.Range.Cells(1, 1).Value))) = UCase$(Trim$(cfgKey)) Then
+            r.Range.Cells(1, 2).Value = cfgValue
+            Exit Sub
+        End If
+    Next r
+
+    Set r = lo.ListRows.Add
+    r.Range.Cells(1, 1).Value = cfgKey
+    r.Range.Cells(1, 2).Value = cfgValue
+End Sub
+
+' Para archivos de locación: bloquea Config (úsalo ya hasta "release")
+Public Sub LockConfigSheet(Optional ByVal pwd As String = "AVASA")
+    With ThisWorkbook.Worksheets("Config")
+        .Protect Password:=pwd, UserInterfaceOnly:=True
+        .Visible = xlSheetVeryHidden
+    End With
+End Sub
+
+
+
+========================================
+COMPONENTE: modGeneradorLocaciones
+TIPO: 1
+========================================
+Option Explicit
+
+'==========================
+' GENERADOR 62 ARCHIVOS
+'==========================
+Public Sub GenerarArchivosPorLocacion()
+
+    Dim lo As ListObject, r As ListRow
+    Dim idxActive As Long, idxCode As Long, idxName As Long, idxCC As Long
+
+    Dim basePath As String
+    Dim locCode As String, locName As String, cc As String
+
+    Dim fileName As String, fullPath As String
+    Dim tempCopyPath As String
+    Dim wbNew As Workbook
+
+    On Error GoTo SafeExit
+
+    ' 1) BasePath (SALIDA) -> Config!MasterDBPath
+    basePath = GetConfig("MasterDBPath", "")
+    If Len(Trim$(basePath)) = 0 Then
+        MsgBox "Config.MasterDBPath está vacío. Ej: C:\AVASA_TMP\OUT\", vbCritical
+        Exit Sub
+    End If
+    If Right$(basePath, 1) <> "\" Then basePath = basePath & "\"
+    EnsureFolderExists basePath
+
+    ' 2) Tabla locaciones
+    Set lo = Nothing
+    On Error Resume Next
+    Set lo = ThisWorkbook.Worksheets("Locaciones").ListObjects("tblLocaciones")
+    On Error GoTo 0
+
+    If lo Is Nothing Then
+        MsgBox "No encontré la tabla tblLocaciones en la hoja 'Locaciones'.", vbCritical
+        Exit Sub
+    End If
+
+    If Not TableHasColumn(lo, "Active") _
+       Or Not TableHasColumn(lo, "LocationCode") _
+       Or Not TableHasColumn(lo, "LocationName") _
+       Or Not TableHasColumn(lo, "CC") Then
+        MsgBox "tblLocaciones debe tener: LocationCode, LocationName, CC, Active", vbCritical
+        Exit Sub
+    End If
+
+    idxActive = lo.ListColumns("Active").Index
+    idxCode = lo.ListColumns("LocationCode").Index
+    idxName = lo.ListColumns("LocationName").Index
+    idxCC = lo.ListColumns("CC").Index
+
+    ' 3) Requisito: template guardado en disco
+    If Len(Trim$(ThisWorkbook.Path)) = 0 Then
+        MsgBox "Guarda primero este template (.xlsm) en una carpeta antes de generar copias.", vbCritical
+        Exit Sub
+    End If
+
+    ' 4) Performance
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+
+    ' 5) Loop locaciones activas
+    For Each r In lo.ListRows
+
+        If Val(r.Range.Cells(1, idxActive).Value) = 1 Then
+
+            locCode = Trim$(CStr(r.Range.Cells(1, idxCode).Value))
+            locName = Trim$(CStr(r.Range.Cells(1, idxName).Value))
+            cc = Trim$(CStr(r.Range.Cells(1, idxCC).Value))
+
+            If locCode <> "" Then
+
+                fileName = "Incidencias_" & locCode & ".xlsm"
+                fullPath = basePath & fileName
+
+                ' Temporal SIEMPRE local
+                tempCopyPath = Environ$("TEMP") & "\__TMP__" & fileName
+                If FileExists(tempCopyPath) Then Kill tempCopyPath
+
+                ' Copiar template -> temp
+                ThisWorkbook.SaveCopyAs tempCopyPath
+
+                ' Abrir temp
+                Set wbNew = Workbooks.Open(fileName:=tempCopyPath, ReadOnly:=False)
+
+                ' *** CLAVE: desproteger Config ANTES de escribir ***
+              If modSeguridadIncidencias.SECURITY_ON Then
+    UnprotectSheetIfExists wbNew, "Config", "AVASA"
+End If
+
+                ' Setear Config
+                SetConfig_InWorkbook wbNew, "LocationCode", locCode
+                SetConfig_InWorkbook wbNew, "LocationName", locName
+                SetConfig_InWorkbook wbNew, "LocationDisplay", locCode & " - " & locName
+                SetConfig_InWorkbook wbNew, "CC", cc
+                SetConfig_InWorkbook wbNew, "TemplateVersion", GetConfig("TemplateVersion", "1.0.0")
+                SetConfig_InWorkbook wbNew, "IsTestFile", "0"
+                SetConfig_InWorkbook wbNew, "IsTemplate", "0"
+
+                ' Volver a proteger Config
+If modSeguridadIncidencias.SECURITY_ON Then
+    ProtectSheetIfExists wbNew, "Config", "AVASA"
+End If
+
+                ' (Opcional) Ocultar Locaciones
+                On Error Resume Next
+                wbNew.Worksheets("Locaciones").Visible = xlSheetHidden
+                On Error GoTo 0
+
+                ' Reemplazar si ya existe
+                If FileExists(fullPath) Then Kill fullPath
+
+                wbNew.SaveAs fileName:=fullPath, FileFormat:=xlOpenXMLWorkbookMacroEnabled
+                wbNew.Close SaveChanges:=True
+
+                ' Limpieza temp
+                If FileExists(tempCopyPath) Then Kill tempCopyPath
+
+            End If
+        End If
+
+    Next r
+
+    MsgBox "Listo. Archivos generados en: " & basePath, vbInformation
+
+SafeExit:
+    Application.EnableEvents = True
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+
+End Sub
+
+'==========================
+' Helpers Config
+'==========================
+Private Sub SetConfig_InWorkbook(ByVal wb As Workbook, ByVal cfgKey As String, ByVal cfgValue As String)
+    Dim lo As ListObject, rr As ListRow
+
+    Set lo = wb.Worksheets("Config").ListObjects("tblConfig")
+
+    For Each rr In lo.ListRows
+        If UCase$(Trim$(CStr(rr.Range.Cells(1, 1).Value))) = UCase$(Trim$(cfgKey)) Then
+            rr.Range.Cells(1, 2).Value = cfgValue
+            Exit Sub
+        End If
+    Next rr
+
+    Set rr = lo.ListRows.Add
+    rr.Range.Cells(1, 1).Value = cfgKey
+    rr.Range.Cells(1, 2).Value = cfgValue
+End Sub
+
+'==========================
+' Helpers protección
+'==========================
+Private Sub UnprotectSheetIfExists(ByVal wb As Workbook, ByVal sheetName As String, ByVal pwd As String)
+    On Error Resume Next
+    wb.Worksheets(sheetName).Unprotect Password:=pwd
+    On Error GoTo 0
+End Sub
+
+Private Sub ProtectSheetIfExists(ByVal wb As Workbook, ByVal sheetName As String, ByVal pwd As String)
+    On Error Resume Next
+    wb.Worksheets(sheetName).Protect Password:=pwd, UserInterfaceOnly:=True
+    On Error GoTo 0
+End Sub
+
+'==========================
+' Helpers varios
+'==========================
+Private Function TableHasColumn(ByVal lo As ListObject, ByVal colName As String) As Boolean
+    On Error GoTo Fail
+    Dim tmp As Long
+    tmp = lo.ListColumns(colName).Index
+    TableHasColumn = True
+    Exit Function
+Fail:
+    TableHasColumn = False
+End Function
+
+Private Function FileExists(ByVal fullPath As String) As Boolean
+    On Error Resume Next
+    FileExists = (Len(Dir(fullPath)) > 0)
+    On Error GoTo 0
+End Function
+
+Private Sub EnsureFolderExists(ByVal folderPath As String)
+    If Len(Dir(folderPath, vbDirectory)) = 0 Then
+        MkDir folderPath
+    End If
+End Sub
+
+
+
+
+========================================
+COMPONENTE: modEmpleadosSync
+TIPO: 1
+========================================
+Option Explicit
+
+'========================================================
+' BuildPeriodID: "2025-12-Q1" o "2025-12-S3"
+'========================================================
+Public Function BuildPeriodID(ByVal anio As Long, ByVal mes As Long, ByVal tipo As String, ByVal Periodo As Long) As String
+    Dim suf As String
+    If UCase$(Trim$(tipo)) = "SEMANAL" Then
+        suf = "S" & CStr(Periodo)
+    Else
+        suf = "Q" & CStr(Periodo)
+    End If
+    BuildPeriodID = CStr(anio) & "-" & Format$(mes, "00") & "-" & suf
+End Function
+
+'========================================================
+' SyncEmpleados_PeriodoActual:
+' - Inserta en hoja "Empleados" SOLO una vez por PeriodID y Locación
+' - No borra meses pasados (esto es lo que quieres)
+'========================================================
+Public Sub SyncEmpleados_PeriodoActual(ByVal periodID As String, ByVal force As Boolean)
+
+    Dim dbPath As String, dbTable As String
+    dbPath = GetConfig("EmployeeDBPath", "")
+    dbTable = GetConfig("EmployeeDBTable", "")
+
+    If Len(Trim$(dbPath)) = 0 Or Len(Trim$(dbTable)) = 0 Then
+        MsgBox "Falta configurar EmployeeDBPath y/o EmployeeDBTable en Config.", vbCritical
+        Exit Sub
+    End If
+
+    'Si no forzamos y ya se sincronizó ese PeriodID, no hacemos nada
+    If Not force Then
+        If UCase$(GetConfig("EmployeeLastSyncPeriodID", "")) = UCase$(periodID) Then Exit Sub
+    End If
+
+    Dim wbDB As Workbook, wsEmp As Worksheet
+    Dim loDB As ListObject
+    Dim loTarget As ListObject
+
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+
+    'Abrir BD (solo lectura)
+    Set wbDB = Workbooks.Open(fileName:=dbPath, ReadOnly:=True)
+
+    'Buscar la tabla por nombre en cualquier hoja
+    Set loDB = FindTableInWorkbook(wbDB, dbTable)
+    If loDB Is Nothing Then
+        wbDB.Close SaveChanges:=False
+        GoTo SafeExitWithMsg
+    End If
+
+    'Hoja destino en archivo de locación
+    Set wsEmp = ThisWorkbook.Worksheets("Empleados")
+
+    'Si ya tienes una tabla en Empleados, úsala; si no, creamos/armamos un rango tabla
+    Set loTarget = Nothing
+    On Error Resume Next
+    If wsEmp.ListObjects.Count > 0 Then Set loTarget = wsEmp.ListObjects(1)
+    On Error GoTo 0
+
+    'Generar/actualizar tabla destino con empleados activos SOLO de esta locación (gLoc)
+    WriteEmpleadosToLocal loDB, wsEmp, loTarget, periodID, gLoc
+
+    'Guardar marca de sync
+    SetConfig "EmployeeLastSyncPeriodID", periodID
+    SetConfig "LastEmployeeSync", Format$(Now, "yyyy-mm-dd hh:nn:ss")
+
+    wbDB.Close SaveChanges:=False
+
+SafeExit:
+    Application.EnableEvents = True
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    Exit Sub
+
+SafeExitWithMsg:
+    MsgBox "No encontré la tabla '" & dbTable & "' dentro de: " & vbCrLf & dbPath, vbCritical
+    Resume SafeExit
+End Sub
+
+
+'========================================================
+' Helpers
+'========================================================
+Private Function FindTableInWorkbook(ByVal wb As Workbook, ByVal tableName As String) As ListObject
+    Dim ws As Worksheet, lo As ListObject
+    For Each ws In wb.Worksheets
+        For Each lo In ws.ListObjects
+            If UCase$(lo.Name) = UCase$(tableName) Then
+                Set FindTableInWorkbook = lo
+                Exit Function
+            End If
+        Next lo
+    Next ws
+    Set FindTableInWorkbook = Nothing
+End Function
+
+Private Sub WriteEmpleadosToLocal(ByVal loDB As ListObject, ByVal wsEmp As Worksheet, ByVal loTarget As ListObject, _
+                                 ByVal periodID As String, ByVal locCode As String)
+
+    'Columnas esperadas en la BD:
+    'PeriodID, GRUPO, CIUDAD, NumeroEmpleado, UsuarioCARs+, DriverCARs+, PUESTO, ACTIVIDAD, NOMBRE, FechaIngreso, FechaBaja
+
+    Dim idxPID As Long, idxGrupo As Long, idxCiudad As Long, idxNum As Long
+    Dim idxUsr As Long, idxDrv As Long, idxPuesto As Long, idxAct As Long, idxNom As Long
+    Dim idxIng As Long, idxBaja As Long
+
+    idxPID = loDB.ListColumns("PeriodID").Index
+    idxGrupo = loDB.ListColumns("GRUPO").Index
+    idxCiudad = loDB.ListColumns("CIUDAD").Index
+    idxNum = loDB.ListColumns("NumeroEmpleado").Index
+    idxUsr = loDB.ListColumns("UsuarioCARs+").Index
+    idxDrv = loDB.ListColumns("DriverCARs+").Index
+    idxPuesto = loDB.ListColumns("PUESTO").Index
+    idxAct = loDB.ListColumns("ACTIVIDAD").Index
+    idxNom = loDB.ListColumns("NOMBRE").Index
+    idxIng = loDB.ListColumns("FechaIngreso").Index
+    idxBaja = loDB.ListColumns("FechaBaja").Index
+
+Dim outRow As Long
+
+On Error Resume Next
+wsEmp.Unprotect Password:="AVASA"
+On Error GoTo 0
+
+wsEmp.Cells.Clear
+
+
+
+    'Headers destino (lo que ya usa tu frmIncidencias: C=Numero, D=Usuario, E=Driver, F=Puesto, G=Actividad, H=Nombre)
+    wsEmp.Range("A1").Value = "GRUPO"
+    wsEmp.Range("B1").Value = "CIUDAD"
+    wsEmp.Range("C1").Value = "NumeroEmpleado"
+    wsEmp.Range("D1").Value = "UsuarioCARs+"
+    wsEmp.Range("E1").Value = "DriverCARs+"
+    wsEmp.Range("F1").Value = "PUESTO"
+    wsEmp.Range("G1").Value = "ACTIVIDAD"
+    wsEmp.Range("H1").Value = "NOMBRE"
+    wsEmp.Range("I1").Value = "FechaIngreso"
+    wsEmp.Range("J1").Value = "FechaBaja"
+
+    outRow = 2
+
+    Dim r As ListRow, fb As Variant, pid As String, grp As String
+    For Each r In loDB.ListRows
+grp = Trim$(CStr(r.Range.Cells(1, idxGrupo).Value))
+fb = r.Range.Cells(1, idxBaja).Value
+
+'Filtro: misma locación + activo (FechaBaja vacía)
+If UCase$(grp) = UCase$(locCode) Then
+    If Len(Trim$(CStr(fb))) = 0 Then
+
+        wsEmp.Cells(outRow, 1).Value = r.Range.Cells(1, idxGrupo).Value
+        wsEmp.Cells(outRow, 2).Value = r.Range.Cells(1, idxCiudad).Value
+        wsEmp.Cells(outRow, 3).Value = r.Range.Cells(1, idxNum).Value
+        wsEmp.Cells(outRow, 4).Value = r.Range.Cells(1, idxUsr).Value
+        wsEmp.Cells(outRow, 5).Value = r.Range.Cells(1, idxDrv).Value
+        wsEmp.Cells(outRow, 6).Value = r.Range.Cells(1, idxPuesto).Value
+        wsEmp.Cells(outRow, 7).Value = r.Range.Cells(1, idxAct).Value
+        wsEmp.Cells(outRow, 8).Value = r.Range.Cells(1, idxNom).Value
+        wsEmp.Cells(outRow, 9).Value = r.Range.Cells(1, idxIng).Value
+        wsEmp.Cells(outRow, 10).Value = r.Range.Cells(1, idxBaja).Value
+
+        outRow = outRow + 1
+    End If
+End If
+    Next r
+
+    'Convertir a tabla local (para que quede ordenado y fácil)
+    Dim lastRow As Long
+    lastRow = wsEmp.Cells(wsEmp.Rows.Count, "A").End(xlUp).Row
+    If lastRow < 2 Then Exit Sub
+
+    Dim rng As Range
+    Set rng = wsEmp.Range("A1").Resize(lastRow, 10)
+
+    On Error Resume Next
+    wsEmp.ListObjects(1).Unlist
+    On Error GoTo 0
+
+    Dim loNew As ListObject
+    Set loNew = wsEmp.ListObjects.Add(xlSrcRange, rng, , xlYes)
+    loNew.Name = "tblEmpleados_Local"
+
+    wsEmp.Columns("A:J").AutoFit
+    
+    '--- Volver a proteger Empleados ---
+If modSeguridadIncidencias.SECURITY_ON Then
+    On Error Resume Next
+    wsEmp.Protect Password:="AVASA", UserInterfaceOnly:=True
+    On Error GoTo 0
+End If
+
+End Sub
+
+
+
+
+========================================
+COMPONENTE: modUID
+TIPO: 1
+========================================
+Option Explicit
+
+'==========================
+' UID: Loc|Año|Mes|Tipo|Periodo|NumEmp|Fecha(yyyymmdd)
+'==========================
+Public Function BuildUID(ByVal locCode As String, _
+                         ByVal anio As Long, ByVal mes As Long, _
+                         ByVal tipoPeriodo As String, ByVal Periodo As Long, _
+                         ByVal numEmp As Long, ByVal dt As Date) As String
+    BuildUID = UCase$(Trim$(locCode)) & "|" & _
+               CStr(anio) & "|" & Format$(mes, "00") & "|" & _
+               UCase$(Trim$(tipoPeriodo)) & "|" & CStr(Periodo) & "|" & _
+               CStr(numEmp) & "|" & Format$(dt, "yyyymmdd")
+End Function
+
+'Convierte "día del periodo" a fecha real del periodo actual
+Public Function FechaDeDiaPeriodo(ByVal anio As Long, ByVal mes As Long, ByVal dia As Long) As Date
+    FechaDeDiaPeriodo = DateSerial(anio, mes, dia)
+End Function
+
+
+
+
+========================================
+COMPONENTE: modMantenimientoMatrices
+TIPO: 1
+========================================
+Option Explicit
+
+'====================================================
+' modMantenimientoMatrices
+' Limpia hojas de matriz M_... por locación,
+' conservando SOLO:
+'   - periodo actual (según fecha hoy)
+'   - periodo anterior inmediato
+' Para SEMANAL y QUINCENAL.
+'====================================================
+
+Public Sub LimpiarMatricesRelevantes(Optional ByVal locCode As String = "", Optional ByVal pwdLibro As String = "AVASA")
+
+    Dim loc As String
+    loc = Trim$(locCode)
+    If loc = "" Then loc = Trim$(gLoc)
+    If loc = "" Then Exit Sub
+
+    '1) Calcular "targets" (actual y anterior) para semanal y quincenal
+    Dim y As Long, m As Long
+    Dim tipo As String, per As Long
+
+    Dim keepDict As Object
+    Set keepDict = CreateObject("Scripting.Dictionary") 'key: sheetname => True
+
+    '--- QUINCENAL ---
+    y = Year(Date): m = Month(Date)
+    tipo = "QUINCENAL"
+    per = PeriodoActualPorFecha(tipo, Date)
+
+    AddKeep keepDict, BuildNombreMatriz(loc, y, m, tipo, per)
+    AddKeep keepDict, NombreMatrizAnterior(loc, y, m, tipo, per)
+
+    '--- SEMANAL ---
+    y = Year(Date): m = Month(Date)
+    tipo = "SEMANAL"
+    per = PeriodoActualPorFecha(tipo, Date)
+
+    AddKeep keepDict, BuildNombreMatriz(loc, y, m, tipo, per)
+    AddKeep keepDict, NombreMatrizAnterior(loc, y, m, tipo, per)
+
+    '2) Borrar cualquier M_ de esta loc que NO esté en keep
+    Dim ws As Worksheet
+    Dim ok As Boolean
+    Dim pLoc As String, pAnio As Long, pMes As Long, pTipo As String, pNumPer As Long
+
+    Dim estabaProtegido As Boolean
+    estabaProtegido = ThisWorkbook.ProtectStructure
+
+    If estabaProtegido Then
+        On Error Resume Next
+        ThisWorkbook.Unprotect pwdLibro
+        On Error GoTo 0
+    End If
+
+    Application.DisplayAlerts = False
+
+    Dim toDelete As Collection
+    Set toDelete = New Collection
+
+    For Each ws In ThisWorkbook.Worksheets
+        If Left$(ws.Name, 2) = "M_" Then
+            ok = TryParseNombreMatriz(ws.Name, pLoc, pAnio, pMes, pTipo, pNumPer)
+            If ok Then
+                If UCase$(pLoc) = UCase$(loc) Then
+                    If Not keepDict.Exists(ws.Name) Then
+                        toDelete.Add ws.Name
+                    End If
+                End If
+            End If
+        End If
+    Next ws
+
+    Dim nm As Variant
+    For Each nm In toDelete
+        On Error Resume Next
+        ThisWorkbook.Worksheets(CStr(nm)).Delete
+        On Error GoTo 0
+    Next nm
+
+    Application.DisplayAlerts = True
+
+    If estabaProtegido Then
+        On Error Resume Next
+        ThisWorkbook.Protect Password:=pwdLibro, Structure:=True
+        On Error GoTo 0
+    End If
+
+End Sub
+
+'========================
+' Helpers (KEEP)
+'========================
+Private Sub AddKeep(ByVal dict As Object, ByVal sheetName As String)
+    If Len(sheetName) = 0 Then Exit Sub
+    If Not dict.Exists(sheetName) Then dict.Add sheetName, True
+End Sub
+
+Private Function BuildNombreMatriz(ByVal loc As String, ByVal anio As Long, ByVal mes As Long, ByVal tipo As String, ByVal numPeriodo As Long) As String
+    Dim suf As String
+    If UCase$(tipo) = "SEMANAL" Then
+        suf = "S" & CStr(numPeriodo)
+    Else
+        suf = "Q" & CStr(numPeriodo)
+    End If
+
+    BuildNombreMatriz = "M_" & loc & "_" & CStr(anio) & "_" & Format$(mes, "00") & "_" & suf
+
+    'Si tu NombreHojaMatriz truncó a 31, aquí igualamos para coincidir
+    If Len(BuildNombreMatriz) > 31 Then BuildNombreMatriz = Left$(BuildNombreMatriz, 31)
+End Function
+
+Private Function NombreMatrizAnterior(ByVal loc As String, ByVal anio As Long, ByVal mes As Long, ByVal tipo As String, ByVal numPeriodo As Long) As String
+
+    Dim y2 As Long, m2 As Long, p2 As Long
+    y2 = anio: m2 = mes: p2 = numPeriodo - 1
+
+    If UCase$(tipo) = "QUINCENAL" Then
+        If p2 < 1 Then
+            'ir al mes anterior y quedarse con Q2
+            BackOneMonth y2, m2
+            p2 = 2
+        End If
+
+    ElseIf UCase$(tipo) = "SEMANAL" Then
+        If p2 < 1 Then
+            'ir al mes anterior y quedarse con S4
+            BackOneMonth y2, m2
+            p2 = 4
+        End If
+    End If
+
+    NombreMatrizAnterior = BuildNombreMatriz(loc, y2, m2, tipo, p2)
+End Function
+
+Private Sub BackOneMonth(ByRef anio As Long, ByRef mes As Long)
+    mes = mes - 1
+    If mes < 1 Then
+        mes = 12
+        anio = anio - 1
+    End If
+End Sub
+
+'========================
+' Periodo actual por fecha
+'========================
+Private Function PeriodoActualPorFecha(ByVal tipo As String, ByVal dt As Date) As Long
+    Dim d As Long, uDia As Long
+    d = Day(dt)
+    uDia = Day(DateSerial(Year(dt), Month(dt) + 1, 0))
+
+    Select Case UCase$(tipo)
+        Case "QUINCENAL"
+            If d <= 15 Then
+                PeriodoActualPorFecha = 1
+            Else
+                PeriodoActualPorFecha = 2
+            End If
+
+        Case "SEMANAL"
+            If d <= 7 Then
+                PeriodoActualPorFecha = 1
+            ElseIf d <= 14 Then
+                PeriodoActualPorFecha = 2
+            ElseIf d <= 21 Then
+                PeriodoActualPorFecha = 3
+            Else
+                PeriodoActualPorFecha = 4
+            End If
+
+        Case Else
+            PeriodoActualPorFecha = 0
+    End Select
+End Function
+
+'========================
+' Parseo robusto del nombre
+' Soporta loc con underscores.
+' Formato esperado:
+'   M_<LOC>_<YYYY>_<MM>_<Q|S><N>
+' Ej: M_CUU_2025_12_Q1
+'========================
+Public Function TryParseNombreMatriz( _
+        ByVal sheetName As String, _
+        ByRef loc As String, _
+        ByRef anio As Long, _
+        ByRef mes As Long, _
+        ByRef tipo As String, _
+        ByRef numPeriodo As Long) As Boolean
+
+    On Error GoTo Fail
+
+    Dim re As Object, m As Object
+    Set re = CreateObject("VBScript.RegExp")
+
+    re.Pattern = "^M_(.+)_(\d{4})_(\d{2})_([QS])(\d+)$"
+    re.IgnoreCase = True
+    re.Global = False
+
+    If Not re.Test(sheetName) Then GoTo Fail
+
+    Set m = re.Execute(sheetName)(0)
+
+    loc = CStr(m.SubMatches(0))
+    anio = CLng(m.SubMatches(1))
+    mes = CLng(m.SubMatches(2))
+
+    Dim t As String
+    t = UCase$(CStr(m.SubMatches(3)))
+    If t = "Q" Then
+        tipo = "QUINCENAL"
+    Else
+        tipo = "SEMANAL"
+    End If
+
+    numPeriodo = CLng(m.SubMatches(4))
+
+    TryParseNombreMatriz = True
+    Exit Function
+
+Fail:
+    TryParseNombreMatriz = False
+End Function
+
+
+
+
+========================================
+COMPONENTE: modCalendario
+TIPO: 1
+========================================
+Option Explicit
+
+Private dictFestivos As Object          ' key: CLng(Date)  value: TRUE
+Private dictFestivoNombre As Object     ' key: CLng(Date)  value: Nombre
+
+'==============================
+'  API PÚBLICA
+'==============================
+Public Sub AplicarCalendarioAMatriz(ByVal wsMatriz As Worksheet)
+    Dim rngFechas As Range
+    Set rngFechas = GetHeaderFechasRange(wsMatriz)
+
+    If Not rngFechas Is Nothing Then
+        PintarDiasEspeciales wsMatriz, rngFechas
+    End If
+End Sub
+
+'==============================
+'  CORE
+'==============================
+Public Function GetDiaTipo(ByVal dt As Date) As String
+    If EsFestivo(dt) Then
+        GetDiaTipo = "DF"
+    ElseIf Weekday(dt, vbMonday) = 7 Then
+        GetDiaTipo = "PD"
+    Else
+        GetDiaTipo = "NORMAL"
+    End If
+End Function
+
+Public Function EsFestivo(ByVal dt As Date) As Boolean
+    EsFestivo = False
+    If dictFestivos Is Nothing Then Exit Function
+    EsFestivo = dictFestivos.Exists(CLng(DateValue(dt)))
+End Function
+
+Public Function GetFestivoNombre(ByVal dt As Date) As String
+    GetFestivoNombre = ""
+    If dictFestivoNombre Is Nothing Then Exit Function
+
+    Dim k As Long
+    k = CLng(DateValue(dt))
+
+    If dictFestivoNombre.Exists(k) Then
+        GetFestivoNombre = CStr(dictFestivoNombre(k))
+    End If
+End Function
+
+'==============================
+'  MATRIZ
+'==============================
+Private Function GetHeaderFechasRange(ByVal ws As Worksheet) As Range
+    Dim startCol As Long, c As Long, lastCol As Long
+
+    startCol = 9 ' Columna I
+    lastCol = startCol
+
+    ' Avanzar mientras haya números (días)
+    For c = startCol To ws.Columns.Count
+        If IsNumeric(ws.Cells(2, c).Value) Then
+            lastCol = c
+        Else
+            Exit For
+        End If
+    Next c
+
+    If lastCol < startCol Then Exit Function
+
+    Set GetHeaderFechasRange = ws.Range(ws.Cells(2, startCol), ws.Cells(2, lastCol))
+End Function
+
+Private Sub PintarDiasEspeciales(ByVal ws As Worksheet, ByVal headerRange As Range)
+    Dim c As Range
+    Dim tipo As String
+    Dim fechaReal As Date
+    Dim dia As Long
+
+    'IMPORTANTE: si hay Formato Condicional, puede estar sobre-escribiendo el color que pongas por VBA
+    On Error Resume Next
+    headerRange.FormatConditions.Delete
+    On Error GoTo 0
+
+    For Each c In headerRange.Cells
+
+        If IsNumeric(c.Value) Then
+            dia = CLng(c.Value)
+
+            'Color base SIEMPRE (amarillo)
+            c.Interior.Color = RGB(240, 200, 80)
+            c.Font.Bold = True
+            c.Font.Italic = False
+
+            'Fecha real del periodo
+            fechaReal = DateSerial(gAnio, gMes, dia)
+            tipo = GetDiaTipo(fechaReal)
+
+            Select Case tipo
+                Case "DF"
+                    'Festivo
+                    c.Interior.Color = RGB(255, 180, 180) 'rojo suave
+
+                Case "PD"
+                    'Domingo
+                    c.Interior.Color = RGB(220, 220, 220) 'gris suave
+            End Select
+        End If
+
+    Next c
+End Sub
+
+'==============================
+'  CARGA FESTIVOS A MEMORIA
+'==============================
+Public Sub CargarFestivosEnMemoria()
+    Dim lo As ListObject
+    Dim lr As ListRow
+    Dim vFecha As Variant, vNombre As Variant, vActivo As Variant
+    Dim f As Date, key As Long
+
+    Set dictFestivos = CreateObject("Scripting.Dictionary")
+    Set dictFestivoNombre = CreateObject("Scripting.Dictionary")
+
+    Set lo = ThisWorkbook.Worksheets("Config").ListObjects("tblFestivos")
+
+    For Each lr In lo.ListRows
+        vFecha = lr.Range(1, 1).Value  ' Fecha
+        vNombre = lr.Range(1, 2).Value ' Nombre
+        vActivo = lr.Range(1, 5).Value ' Activo
+
+        If IsDate(vFecha) Then
+            f = DateValue(CDate(vFecha))
+            key = CLng(f)
+
+            If EsVerdadero(vActivo) Then
+                dictFestivos(key) = True
+                dictFestivoNombre(key) = CStr(vNombre)
+            End If
+        End If
+    Next lr
+End Sub
+
+Private Function EsVerdadero(ByVal v As Variant) As Boolean
+    On Error GoTo Falso
+    If IsError(v) Or IsEmpty(v) Then GoTo Falso
+
+    If VarType(v) = vbBoolean Then
+        EsVerdadero = (v = True)
+        Exit Function
+    End If
+
+    If IsNumeric(v) Then
+        EsVerdadero = (CLng(v) <> 0)
+        Exit Function
+    End If
+
+    Select Case UCase$(Trim$(CStr(v)))
+        Case "TRUE", "VERDADERO", "SI", "SÍ", "1", "X"
+            EsVerdadero = True
+        Case Else
+            EsVerdadero = False
+    End Select
+    Exit Function
+
+Falso:
+    EsVerdadero = False
+End Function
+
+
+
+========================================
+COMPONENTE: modCatalogoIncidencias
+TIPO: 1
+========================================
+Option Explicit
+
+Private Const WS_CFG As String = "Config"
+Private Const LO_CAT As String = "tblCatalogoIncidencias"
+
+'=========================================
+' Normalización
+'=========================================
+' Normaliza para comparar: mayúsculas, sin espacios, sin "/"
+Public Function NormalizaCodigo(ByVal s As String) As String
+    s = UCase$(Trim$(s))
+    s = Replace$(s, " ", "")
+    s = Replace$(s, "/", "")
+    NormalizaCodigo = s
+End Function
+
+' Canoniza alias históricos y limpia basura
+' - "T/D" -> "TD"
+' - "FI"  -> "F"
+' - "0"   -> "" (lo eliminamos)
+Public Function CanonizarCodigo(ByVal codigo As String) As String
+    Dim norm As String
+    norm = NormalizaCodigo(codigo)
+
+    Select Case norm
+        Case "", "0"
+            CanonizarCodigo = ""
+        Case "TD", "T/D"
+            CanonizarCodigo = "TD"
+        Case "FI"
+            CanonizarCodigo = "F"
+        Case Else
+            CanonizarCodigo = norm
+    End Select
+End Function
+
+'=========================================
+' Catálogo
+'=========================================
+' Recalcula la columna [Normalizado] = NormalizaCodigo([Codigo])
+Public Sub Catalogo_RecalcularNormalizados()
+    Dim lo As ListObject, lr As ListRow
+    Dim idxCod As Long, idxNorm As Long
+
+    Set lo = ThisWorkbook.Worksheets(WS_CFG).ListObjects(LO_CAT)
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    idxCod = lo.ListColumns("Codigo").Index
+    idxNorm = lo.ListColumns("Normalizado").Index
+
+    For Each lr In lo.ListRows
+        lr.Range(1, idxNorm).Value = NormalizaCodigo(CStr(lr.Range(1, idxCod).Value))
+    Next lr
+End Sub
+
+' Devuelve array 1D con códigos ACTIVOS (para dropdown)
+Public Function GetCodigosActivos() As Variant
+    Dim lo As ListObject
+    Dim arr, out(), i As Long, n As Long
+    Dim idxCod As Long, idxActivo As Long
+
+    Set lo = ThisWorkbook.Worksheets(WS_CFG).ListObjects(LO_CAT)
+    If lo.DataBodyRange Is Nothing Then Exit Function
+
+    arr = lo.DataBodyRange.Value
+    idxCod = lo.ListColumns("Codigo").Index
+    idxActivo = lo.ListColumns("Activo").Index
+
+    ReDim out(1 To UBound(arr, 1)) 'máximo
+    n = 0
+
+    For i = 1 To UBound(arr, 1)
+        If VBA.CBool(arr(i, idxActivo)) = True Then
+            n = n + 1
+            out(n) = CStr(arr(i, idxCod))
+        End If
+    Next i
+
+    If n = 0 Then Exit Function
+    ReDim Preserve out(1 To n)
+
+    GetCodigosActivos = out
+End Function
+
+' Valida si un código (o alias) existe en catálogo y está ACTIVO
+' OJO: permite "" (vacío) como válido
+Public Function EsCodigoValido(ByVal codigo As String) As Boolean
+    Dim lo As ListObject
+    Dim rngNorm As Range
+    Dim norm As String, r As Variant
+    Dim idxActivo As Long
+
+    norm = CanonizarCodigo(codigo)
+    If Len(norm) = 0 Then
+        EsCodigoValido = True
+        Exit Function
+    End If
+
+    Set lo = ThisWorkbook.Worksheets(WS_CFG).ListObjects(LO_CAT)
+    Set rngNorm = lo.ListColumns("Normalizado").DataBodyRange
+    idxActivo = lo.ListColumns("Activo").Index
+
+    r = Application.Match(norm, rngNorm, 0)
+    If IsError(r) Then
+        EsCodigoValido = False
+    Else
+        EsCodigoValido = VBA.CBool(lo.DataBodyRange.Cells(CLng(r), idxActivo).Value)
+    End If
+End Function
+
+'=========================================
+' BD (opcional): canoniza toda la columna O
+'=========================================
+Public Sub BD_CanonizarCodigos()
+    Dim ws As Worksheet
+    Dim lastRow As Long, i As Long
+    Dim v As String, canon As String
+
+    Set ws = ThisWorkbook.Worksheets("BDIncidencias_Local")
+    lastRow = ws.Cells(ws.Rows.Count, "O").End(xlUp).Row ' O = CodigoInc
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    On Error Resume Next
+    ws.Unprotect "AVASA"
+    ws.Unprotect "IncidenciasAVASA"
+    On Error GoTo 0
+
+    For i = 2 To lastRow
+        v = CStr(ws.Cells(i, "O").Value)
+        If Len(Trim$(v)) > 0 Then
+            canon = CanonizarCodigo(v)
+            If canon <> v Then ws.Cells(i, "O").Value = canon
+        End If
+    Next i
+
+    On Error Resume Next
+    ws.Protect Password:="AVASA"
+    On Error GoTo 0
+
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    MsgBox "Listo. Canonizados códigos en BD: columna O.", vbInformation
+End Sub
+
+
+
+========================================
+COMPONENTE: modExportVBA
+TIPO: 1
+========================================
+Option Explicit
+
+Public Sub ExportarVBA_A_UnSoloTXT()
+    Dim exportFile As String
+    Dim vbComp As Object
+    Dim codeLine As String
+    Dim ff As Integer
+    Dim i As Long
+    
+    exportFile = "C:\Users\OPERADOR1\OneDrive - AVASA\Documentos\Comisiones e incidencias AVASA\Proyecto automatización\CodigoBVA\VBA_TODO.txt"
+    
+    ff = FreeFile
+    Open exportFile For Output As #ff
+    
+    For Each vbComp In ThisWorkbook.VBProject.VBComponents
+        
+        Print #ff, "========================================"
+        Print #ff, "COMPONENTE: " & vbComp.Name
+        Print #ff, "TIPO: " & vbComp.Type
+        Print #ff, "========================================"
+        
+        If vbComp.CodeModule.CountOfLines > 0 Then
+            For i = 1 To vbComp.CodeModule.CountOfLines
+                Print #ff, vbComp.CodeModule.Lines(i, 1)
+            Next i
+        End If
+        
+        Print #ff, vbCrLf
+    Next vbComp
+    
+    Close #ff
+    
+    MsgBox "Archivo único creado:" & vbCrLf & exportFile, vbInformation
+End Sub
+
+
+Public Sub ExportarVBA_AVASA()
+    Dim exportPath As String
+    Dim vbComp As Object
+    Dim ext As String
+    
+    exportPath = "C:\Users\OPERADOR1\OneDrive - AVASA\Documentos\Comisiones e incidencias AVASA\Proyecto automatización\CodigoBVA\"
+    
+    If Dir(exportPath, vbDirectory) = "" Then
+        MsgBox "La carpeta no existe:" & vbCrLf & exportPath, vbCritical
+        Exit Sub
+    End If
+    
+    For Each vbComp In ThisWorkbook.VBProject.VBComponents
+        
+        Select Case vbComp.Type
+            Case 1 ' Módulo estándar
+                ext = ".bas"
+            Case 2 ' Clase
+                ext = ".cls"
+            Case 3 ' UserForm
+                ext = ".frm"
+            Case 100 ' ThisWorkbook / Sheets
+                ext = ".cls"
+            Case Else
+                ext = ".txt"
+        End Select
+        
+        On Error Resume Next
+        vbComp.Export exportPath & vbComp.Name & ext
+        On Error GoTo 0
+        
+    Next vbComp
+    
+    MsgBox "Exportación completada en:" & vbCrLf & exportPath, vbInformation
+End Sub
+
+
+
