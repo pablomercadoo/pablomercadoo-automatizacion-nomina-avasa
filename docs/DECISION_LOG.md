@@ -1,23 +1,28 @@
-## UID único para incidencias
+## 2025-12-18 — UID único para incidencias + normalización de catálogo
 
-**Decisión**
-El UID oficial del sistema para incidencias será:
+**Problema**
+- Existían 2 implementaciones de UID (riesgo de duplicados / comportamiento inconsistente).
+- Error “código R no es válido” pese a estar activo (catálogo sin columna Normalizado poblada).
 
-LOC|NUMEMP|AÑO|MM|TIPO_PERIODO|PERIODO|DIA
+**Decisiones**
+1) **UID oficial de incidencias (por día):**  
+   `LOC|NUMEMP|AÑO|MM|TIPO|PERIODO|DIA`
+
+2) **Normalización de catálogo:**  
+   Todo código activo debe tener un valor en **Normalizado** (aliases apuntan al código canon).
 
 **Motivo**
-- Permite upsert por día
-- Evita duplicados
-- No depende de timestamp
+- Permite UPSERT por día (editar no duplica).
+- Evita dependencias de timestamp/fecha completa.
+- La validación se vuelve determinista (catálogo canonizado).
 
-**Implementación**
-- BuildUID vive en modUID
-- frmIncidencias NO define su propia versión
+**Cambios**
+- `frmIncidencias` ya no define `BuildUID` (se eliminó la versión duplicada).
+- `frmIncidencias` ahora usa `modUID.BuildUID_Incidencia`.
+- Se llenó la columna **Normalizado** en `tblCatalogoIncidencias`:
+  - códigos canónicos → se normalizan a sí mismos (R→R, X→X, etc.)
+  - aliases → apuntan al canon (T/D→TD, FI→F, etc.)
 
-Decisión: UID oficial incidencias = LOC|NUMEMP|AÑO|MM|TIPO|PERIODO|DIA
-
-Cambio: frmIncidencias ya no define BuildUID; ahora usa modUID.BuildUID_Incidencia
-
-Riesgo evitado: 2 BuildUID con formatos distintos
-
-Prueba: “editar misma incidencia mismo día no duplica”
+**Pruebas**
+- Editar la misma incidencia en el mismo día **no duplica** (UPSERT OK).
+- Códigos `R`, `TD` y alias `T/D` validan correctamente.
