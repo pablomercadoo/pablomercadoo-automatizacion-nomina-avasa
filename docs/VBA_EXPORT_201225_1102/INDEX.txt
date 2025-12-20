@@ -1,0 +1,29 @@
+Export VBA - 2025-12-20 11:02:11
+Workbook: Formulario propuesta 1.xlsm
+Folder: C:\Users\OPERADOR1\OneDrive - AVASA\Documentos\Comisiones e incidencias AVASA\Proyecto automatización\CodigoBVA\VBA_EXPORT_201225_1102\
+----------------------------------------------------------------------
+Name | Type | File | Result
+----------------------------------------------------------------------
+ThisWorkbook | 100 | ThisWorkbook.cls | OK
+frmIncidencias | 3 | frmIncidencias.frm | OK
+frmMenuPrincipal | 3 | frmMenuPrincipal.frm | OK
+Hoja2 | 100 | Hoja2.cls | OK
+Hoja4 | 100 | Hoja4.cls | OK
+ModGlobal | 1 | ModGlobal.bas | OK
+modReporteIncidencias | 1 | modReporteIncidencias.bas | OK
+Hoja6 | 100 | Hoja6.cls | OK
+Hoja3 | 100 | Hoja3.cls | OK
+Hoja7 | 100 | Hoja7.cls | OK
+modSeguridadIncidencias | 1 | modSeguridadIncidencias.bas | OK
+Hoja8 | 100 | Hoja8.cls | OK
+modAdmin | 1 | modAdmin.bas | OK
+Hoja1 | 100 | Hoja1.cls | OK
+modConfig | 1 | modConfig.bas | OK
+modGeneradorLocaciones | 1 | modGeneradorLocaciones.bas | OK
+modEmpleadosSync | 1 | modEmpleadosSync.bas | OK
+modUID | 1 | modUID.bas | OK
+modMantenimientoMatrices | 1 | modMantenimientoMatrices.bas | OK
+modCalendario | 1 | modCalendario.bas | OK
+modCatalogoIncidencias | 1 | modCatalogoIncidencias.bas | OK
+modExportVBA | 1 | modExportVBA.bas | OK
+modPeriodos | 1 | modPeriodos.bas | OK
