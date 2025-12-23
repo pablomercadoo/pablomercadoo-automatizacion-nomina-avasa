@@ -137,3 +137,131 @@ Flujos a implementar:
   Implementar **modos de carga por locación** y **alta temporal de empleado**.
 
 ---
+# Bitácora — 23 de diciembre de 2025 (5:00 pm)
+
+## Contexto
+Sesión enfocada en **estabilizar y cerrar la v1 funcional** del sistema de incidencias.
+El objetivo no fue agregar features nuevos, sino **blindar reglas de negocio, UX y consistencia de datos**.
+
+---
+
+## ✅ Trabajo completado
+
+### 1. Core de incidencias (cerrado)
+- `BDIncidencias_Local` definida como **fuente única de verdad**.
+- UID único por **empleado + periodo + día** funcionando correctamente.
+- Flujo **Agregar / Editar / Eliminar** validado:
+  - Editar sobrescribe por UID.
+  - Eliminar borra de BD y limpia la matriz al regenerar.
+- La matriz **siempre se regenera desde BD**, no se edita manualmente.
+- Al guardar en modo edición:
+  - Se refresca la matriz.
+  - El formulario se cierra automáticamente.
+
+---
+
+### 2. Catálogo de incidencias y normalización
+- Catálogo activo y normalizado validado.
+- Aliases resueltos (ej. `T/D → TD`, `FI → F`, etc.).
+- La lógica ya **no depende del texto capturado**, sino del código canonizado.
+- Incidencia **B (Baja)**:
+  - Siempre aparece al final de la lista.
+  - Requiere confirmación explícita al guardar.
+
+---
+
+### 3. Reglas por tipo de día (blindaje completo)
+Se implementó un sistema **a prueba de errores humanos**:
+
+#### Domingos (PD) y días feriados (DF)
+- ❌ Se elimina la opción **X (Asistencia)**.
+- ✅ Solo se permiten:
+  - PD / DF (según aplique)
+  - B (Baja)
+  - Otras incidencias válidas (vacaciones, incapacidades, descansos, etc.).
+
+#### Días normales
+- ❌ No se permite seleccionar PD ni DF.
+- Si vienen cargados desde BD:
+  - Se corrigen automáticamente (PD/DF → X o vacío).
+- Todas las demás incidencias son válidas.
+
+#### Blindaje doble
+- Las reglas se aplican:
+  - Al cargar el formulario.
+  - Antes de guardar (blindaje final).
+- Aunque el usuario intente forzar un valor, **el sistema lo corrige**.
+
+---
+
+### 4. Formulario `frmIncidencias`
+- Inicialización estable.
+- Precarga desde BD funcionando correctamente.
+- Reglas de combos por día se reaplican siempre.
+- No guarda estados inválidos.
+- UX consistente y predecible.
+
+---
+
+### 5. Precarga desde checador (CAP)
+- Soporta cargas:
+  - Parciales.
+  - Acumuladas.
+  - Múltiples veces por periodo.
+- Regla crítica cumplida:
+  - **Checador solo pisa registros de checador**.
+  - Manual nunca se sobreescribe.
+- Sin duplicados ni pérdida de información.
+- Matriz se regenera correctamente tras cada carga.
+
+👉 **CAP puede operar en producción controlada.**
+
+---
+
+## ⚠️ Pendientes identificados (no implementados)
+
+### 1. Modos de carga por locación
+- Falta agregar campo `TieneChecador` en `tblLocaciones`.
+- El botón **Agregar** aún no pregunta:
+  - Manual
+  - Precarga desde checador
+  - Alta temporal
+
+---
+
+### 2. Alta temporal de empleados
+- No existe aún `Empleados_Temp`.
+- El formulario requiere que el empleado exista en `Empleados`.
+- Falta el flujo:
+  - Empleado no existe → alta temporal por periodo.
+- La matriz aún no hace UNION con empleados temporales.
+
+---
+
+### 3. Estados del periodo (decisión consciente)
+No se trabajó en:
+- Estados BORRADOR / ENVIADO / CERRADO.
+- Bloqueo real del libro.
+- Archivado histórico.
+
+(Se decidió conscientemente **no tocar esto en esta sesión**).
+
+---
+
+## Estado final de la sesión
+- ✅ v1 del sistema **estable, consistente y usable**.
+- 🧠 Reglas de negocio críticas correctamente implementadas.
+- 🟡 Features estructurales grandes (modos de carga y alta temporal) **diferidas** para evitar sobrecarga.
+
+---
+
+## Próximo paso sugerido
+Cuando se retome el proyecto:
+1. Definir `tblLocaciones.TieneChecador`.
+2. Selector de modos en botón **Agregar**.
+3. Implementar `Empleados_Temp`.
+4. UNION de empleados base + temporales en matriz.
+
+---
+
+**Sesión cerrada a las 17:00 hrs.**
