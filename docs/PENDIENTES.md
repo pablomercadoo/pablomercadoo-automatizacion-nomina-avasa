@@ -24,3 +24,67 @@ Estado: **pendientes conscientes, no bloqueantes**
   - ¿Se guarda UID en `BDIncidencias_Local`?
   - ¿O se calcula solo en el consolidado master?
 - UID propuesto:
+LOC|AÑO|MES|TIPO|PERIODO|NUMEMP|FECHA
+
+yaml
+Copy code
+- Impacto: alto para consolidación, bajo para operación local
+
+---
+
+### 3) Consolidación de los 62 reportes (Master)
+- Pendiente crear archivo **MASTER** que:
+- Recorra carpeta de locaciones
+- Abra cada `Incidencias_XXX.xlsm` en read-only
+- Lea `BDIncidencias_Local`
+- Unifique todo en una sola tabla
+- Este paso **no bloquea V1**, pero es clave para V1.5
+
+---
+
+## 🟡 Pendientes de UX / Formato
+
+### 4) Ajuste visual de la matriz
+- Ocultar columnas **Locación** y **Ciudad** en la matriz
+- Mantenerlas en BD (necesarias para consolidado)
+- Reajustar:
+- anchos de columnas
+- freeze panes
+- posición visual (menos desplazamiento horizontal)
+
+---
+
+### 5) Automatización de Bono Comedor (CAP)
+- Definir regla exacta:
+- basada en asistencias X
+- o en días trabajados
+- Integrar al flujo de **CompletarPeriodoActual**
+- Actualmente:
+- la columna existe
+- no está automatizada
+
+---
+
+## 🟢 Pendientes menores / futuros (V2)
+
+- Diferenciar empleados **semanales vs quincenales** desde RH
+- Automatizar cierre por fecha (CloseTS)
+- Separar App / Data (template único)
+- Auditoría visual de AUTO vs manual
+- Mejora estética general
+
+---
+
+## ✅ Lo que NO es pendiente
+- Menú único (frmOpciones)
+- Eliminación de empleado
+- Dropdowns de puesto/actividad
+- Seguridad por periodo
+- Regeneración de matriz
+- Flujo completo de captura
+
+---
+
+🧠 Regla:  
+Todo lo anterior **ya no bloquea operación**.  
+Lo pendiente se ataca con cabeza fría en enero.
