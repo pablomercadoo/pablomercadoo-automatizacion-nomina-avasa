@@ -211,4 +211,89 @@ Se trabajó bajo presión real de fecha, priorizando **arquitectura, estabilidad
 - Editar incidencias: 🔴 Abre sin cargar
 
 ---
+# 🧾 Bitácora técnica — 31/12
+
+⏰ Hora de cierre: 13:00  
+🎯 Estado general: **V1 funcional, estable y usable**  
+🧠 Modo de trabajo: ejecución, sin refactors grandes
+
+---
+
+## ✅ Logros del día
+
+### 🔧 Estabilidad general
+- El proyecto **compila en verde** sin errores.
+- Flujo completo operativo desde **frmOpciones**:
+  - Agregar
+  - Editar
+  - Limpiar incidencias
+  - Eliminar empleado de la matriz
+  - Completar periodo (AUTO)
+  - Cerrar periodo
+
+### 📊 Matriz de incidencias
+- Se consolidó el modelo:
+  - **La matriz se genera SIEMPRE desde `Empleados`**
+  - Las incidencias se leen exclusivamente desde `BDIncidencias_Local`
+- Se corrigió definitivamente:
+  - Puesto / Actividad (ya no aparecen como `1`)
+  - UsuarioCARs / DriverCARs
+- El botón único **OPCIONES** reemplaza todos los botones de hoja.
+
+### 🧑‍💼 Empleados
+- Empleados oficiales + temporales funcionan correctamente.
+- Se implementó **eliminación por periodo**:
+  - El empleado eliminado:
+    - desaparece de la matriz
+    - NO se borra de BD (queda respaldo)
+    - NO se completa en AUTO
+- El flujo ya distingue correctamente:
+  - Oficial
+  - Temporal
+  - Eliminado por periodo
+
+### 🧠 Completar periodo (AUTO)
+- La macro **CompletarPeriodoActual**:
+  - Inserta incidencias en **BD**, no solo en la matriz.
+  - Recorre **solo empleados visibles** en la matriz.
+  - Respeta:
+    - manual vs AUTO
+    - domingos (PD)
+    - festivos (DF)
+    - normales (X)
+- Se integra con seguridad de periodo abierto/cerrado.
+
+### 🔐 Seguridad
+- Periodo cerrado:
+  - Bloquea agregar / editar / limpiar / eliminar
+  - Deja el sistema en **solo lectura**
+- `modSeguridadIncidencias` ya gobierna toda la UI.
+
+### 📦 Catálogos (decisión importante)
+- Se **eliminan catálogos locales** de Puesto / Actividad.
+- Los dropdowns se alimentan de:
+  - **valores únicos globales** desde la BD del ETL
+- Esto permite:
+  - crear puestos nuevos en cualquier locación
+  - sin romper reglas futuras
+
+---
+
+## 🧭 Decisiones importantes del día
+
+- ✔️ La **fuente de verdad** son las BD, no las matrices.
+- ✔️ El consolidado futuro se hará **desde BDIncidencias**, no desde hojas.
+- ✔️ Eliminar empleado ≠ borrar BD (se marca por periodo).
+- ✔️ V1 prioriza **operación real** sobre perfección visual.
+
+---
+
+## 📌 Estado al cierre
+
+- Sistema **usable para gerentes**
+- Flujo completo de captura y cierre
+- Pendientes ya claramente acotados (ver `PENDIENTES.md`)
+
+⛔ Se cierra sesión sin abrir nuevos frentes.
+
 
