@@ -297,3 +297,70 @@ Se trabajó bajo presión real de fecha, priorizando **arquitectura, estabilidad
 ⛔ Se cierra sesión sin abrir nuevos frentes.
 
 
+---
+
+## 🗓️ 5 de enero de 2026 — Ajustes UX finales y consolidación de catálogo
+
+### Contexto
+Sesión enfocada en **pulir la experiencia de uso (UX)** del sistema ya funcional, sin modificar el CORE ni las reglas de negocio.
+Se trabajó con feedback directo de operación real sobre la matriz y el formulario de incidencias.
+
+### ✅ Avances logrados
+
+#### 1. UX de la matriz de incidencias
+- Se ajustó el formato visual final de la matriz:
+  - **Título**:
+    - Tamaño 14
+    - Alineado a la izquierda
+  - **Encabezados**:
+    - Tamaño 11
+    - Centrados
+  - **Fuente general**:
+    - Calibri tamaño 9
+- Autoajuste correcto de columnas clave.
+- Columnas centradas:
+  - NumEmpleado
+  - UsuarioCARs
+  - DriverCARs
+- Columnas GRUPO y CIUDAD ocultas en vista (se mantienen para lógica interna).
+- La matriz prioriza lectura rápida para gerentes.
+
+#### 2. Formulario de incidencias (`frmIncidencias`)
+- El ComboBox de incidencias ahora:
+  - Muestra **descripciones completas** (ej. *Falta*, *Vacaciones*, *Permiso*).
+  - Guarda internamente **solo el código canonizado** (F, V, PD, etc.).
+- Implementación de ComboBox de **2 columnas**:
+  - Columna visible: Descripción
+  - Columna oculta: Código
+- La matriz sigue mostrando **letras**, no textos largos.
+
+#### 3. Catálogo de incidencias
+- `modCatalogoIncidencias` consolidado como **fuente única de verdad**:
+  - Normalización
+  - Canonización
+  - Validación de códigos
+- Eliminación de dependencias dispersas al catálogo.
+- Implementación de **cache interno** para descripciones:
+  - Mejora de performance.
+  - Lookup centralizado y consistente.
+
+### 🧠 Decisiones de diseño
+- El usuario **nunca interactúa con códigos crudos**.
+- La UX se mejora **sin tocar reglas de negocio**.
+- La matriz sigue siendo una vista compacta y operativa.
+- El catálogo gobierna validación y visualización, no la hoja.
+
+### 📌 Pendientes no bloqueantes
+- Consolidado multi-locación desde Drive.
+- ETL definitivo de Drivers / UsuarioCARs.
+- Exportación / impresión de matriz.
+- Indicadores visuales de estado del periodo (ENVIADO / CERRADO).
+
+### 📊 Estado al cierre
+- CORE incidencias: 🟢 Cerrado.
+- Matriz: 🟢 Estable y presentable.
+- Formulario: 🟢 Claro y robusto.
+- Catálogo: 🟢 Centralizado.
+- Seguridad: 🟢 Activa.
+
+⛔ No se abren nuevos frentes.
