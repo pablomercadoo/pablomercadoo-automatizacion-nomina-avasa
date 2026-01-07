@@ -88,3 +88,9 @@ Copy code
 🧠 Regla:  
 Todo lo anterior **ya no bloquea operación**.  
 Lo pendiente se ataca con cabeza fría en enero.
+
+
+- Ejecutar pruebas funcionales SEM / QUIN en matriz
+- Validar conteo correcto de empleados por tipo de nómina
+- Confirmar comportamiento con empleados TEMP
+- Integrar futuras bases de Usuarios / Drivers (pendiente Mauricio)
