@@ -26,3 +26,28 @@
 **Pruebas**
 - Editar la misma incidencia en el mismo día **no duplica** (UPSERT OK).
 - Códigos `R`, `TD` y alias `T/D` validan correctamente.
+
+
+## 2026-01-06 — Filtro estricto SEM / QUIN en matriz
+
+**Decisión**
+La matriz de incidencias solo cargará empleados cuya `TipoNomina`
+coincida exactamente con el `TipoPeriodo` seleccionado (SEM o QUIN).
+
+**Regla**
+- Locación = gLoc
+- TipoNomina = TipoPeriodo
+- Empleados sin TipoNomina **no entran**
+
+**Motivo**
+- Evitar mezclar nóminas operativas distintas.
+- Prevenir carga de empleados “basura” o ambiguos.
+- Mantener comportamiento determinista por periodo.
+
+**Alcance**
+- Se aplica en un solo punto: generación de matriz desde `Empleados`.
+- No afecta ETL ni edición manual de incidencias.
+
+**Estado**
+Implementado – pendiente de pruebas funcionales.
+
