@@ -364,3 +364,86 @@ Se trabajó con feedback directo de operación real sobre la matriz y el formula
 - Seguridad: 🟢 Activa.
 
 ⛔ No se abren nuevos frentes.
+
+
+# 📒 Bitácora de trabajo — Automatización Incidencias AVASA
+
+## 🗓️ 6 de enero de 2026 — Integración nómina SEM / QUIN
+
+### Contexto
+Jornada enfocada en integrar correctamente la **nómina (SEM / QUIN)** al sistema de incidencias y en conectar el **ETL de empleados** con la **matriz**, sin romper el CORE existente.  
+Se trabajó bajo cansancio acumulado, por lo que se priorizó **estabilidad, backups y decisiones conscientes**, evitando cerrar en falso.
+
+---
+
+### ✅ Avances del día
+
+#### 1. ETL de nómina
+- Se habilitó la **lectura directa de archivo de nómina** desde disco.
+- El ETL:
+  - Valida formato.
+  - Detecta **TipoNomina (SEM / QUIN)**.
+  - Inserta el dato en el **Master de empleados**.
+- Se confirmó que los archivos de **15 y 30 de diciembre** tienen el mismo layout → compatible para automatización.
+
+#### 2. Master de empleados
+- Se integró la columna **`TipoNomina`** al master (`Base de datos empleados.xlsx`).
+- Header validado incluye:
+NumeroEmpleado, LocCode, TipoNomina, UsuarioCARs, DriverCARs, Puesto, Actividad, Nombre, etc.
+
+markdown
+Copy code
+- El dato ya fluye desde nómina hacia el master.
+
+#### 3. Matriz de incidencias
+- Se implementó el **filtro estricto por TipoNomina** al generar la matriz:
+- Locación = `gLoc`
+- TipoNomina = TipoPeriodo seleccionado (SEM / QUIN)
+- El filtro se aplica en **un solo punto**, al construir la matriz desde la hoja `Empleados`.
+- Regla aplicada:
+- Empleados sin `TipoNomina` **no entran** (decisión intencional para evitar ruido).
+
+#### 4. Estabilidad
+- Ambos proyectos:
+- **ETL**
+- **Incidencias**
+- Compilan correctamente.
+- No se rompió:
+- Agregar / Editar / Eliminar incidencias
+- Precargas
+- Seguridad de cierre de periodo
+
+---
+
+### 🧠 Decisiones clave
+- Se adopta **filtro estricto** por TipoNomina (SEM ≠ QUIN).
+- No se implementa tolerancia temporal para empleados sin TipoNomina.
+- Se decide **no forzar cierre funcional** sin pruebas completas.
+- Se prioriza backup y trazabilidad sobre avanzar más código.
+
+---
+
+### ⚠️ Estado al cierre
+- Código **compila**.
+- Lógica **conceptualmente correcta**.
+- **Pruebas funcionales pendientes**:
+- Validar conteo correcto SEM vs QUIN.
+- Verificar que no se excluyan empleados válidos por headers.
+- Confirmar comportamiento con empleados temporales.
+
+---
+
+### 📌 Pendientes siguientes
+1. Ejecutar pruebas reales SEM / QUIN por locación.
+2. Validar UX cuando no hay empleados visibles.
+3. Revisar consistencia de `TipoNomina` en todo el master.
+4. Preparar integración futura de **Usuarios / Drivers** cuando exista la base.
+
+---
+
+### 🔒 Cierre del día
+Se deja el sistema en **estado estable**, con backups realizados en:
+- Incidencias
+- ETL
+
+El trabajo continuará a partir de este punto sin deuda técnica oculta.
