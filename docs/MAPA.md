@@ -146,3 +146,19 @@
 
 ---
 
+### Flujo de empleados (actual)
+
+Nómina (SEM / QUIN)
+↓
+ETL Empleados
+↓
+Master: Base de datos empleados.xlsx
+  - Incluye: TipoNomina
+↓
+Archivo de locación
+  - Hoja: Empleados
+↓
+Matriz de incidencias
+  - Filtra por:
+    - Locación
+    - TipoNomina = TipoPeriodo
