@@ -1,0 +1,15 @@
+# Arquitectura del sistema — V1
+
+## Componentes principales
+- Template (.xlsm): archivo base desde el cual se generan las locaciones
+- Archivo de locación: un archivo por locación
+- MasterData: archivos externos (empleados, catálogos)
+
+## Flujo general
+Template → Generador → 62 archivos → Uso por gerentes → Nómina
+
+## Capas
+- UI: Formularios (Menú, Incidencias)
+- Lógica: módulos VBA
+- Datos: tablas estructuradas (ListObjects)
+- Seguridad: protección de hojas y periodos
