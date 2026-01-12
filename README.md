@@ -50,6 +50,9 @@ Existe una **excepción operativa importante** para **CAP (Cancún Aeropuerto)**
   - Oculta hojas técnicas
   - Deja visible `Menu`
 
+
+
+
 ---
 
 ### 2) modGlobal
@@ -70,6 +73,35 @@ gLoc, gLocDisplay, gIsTemplate
 - Acciones:
   - Sincroniza empleados (`modEmpleadosSync`)
   - Genera matriz (`modReporteIncidencias`)
+
+## 🧭 frmOpciones (botones reales)
+
+- **AGREGAR INCIDENCIA**  
+  Solo cuando el empleado **no aparece** en el registro. Se captura manualmente su número y datos base para que ya pueda trabajarse en el periodo.
+
+- **EDITAR INCIDENCIA**  
+  Aquí se capturan y corrigen las incidencias por día.  
+  ⚠️ Para “agregar incidencias”, SIEMPRE se usa este botón (aunque el empleado haya sido agregado manualmente).
+
+- **COMPLETAR INCIDENCIAS**  
+  Autocompleta asistencias faltantes (X/PD/DF) para cerrar limpio el periodo.  
+  Regla: aquí se generan las **no-incidencias** (asistencias), no el gerente.
+
+- **LIMPIAR INCIDENCIAS**  
+  Borra incidencias del periodo actual (acción delicada).
+
+- **ELIMINAR EMPLEADO**  
+  Quita al empleado del periodo actual (si fue agregado por error o no corresponde).
+
+- **CAMBIAR PERIODO**  
+  Salir y seleccionar otro periodo.
+
+- **CERRAR PERIODO**  
+  Bloquea el periodo y deja el archivo en solo lectura para ese periodo.
+
+- **CERRAR MENÚ**  
+  Cierra la ventana del menú.
+
 
 ---
 
@@ -176,19 +208,46 @@ LOC|EMP|AÑO|MM|TIPO|PERIODO|DIA
 
 ---
 
-## 🔁 Flujo end-to-end
+## 🔁 Flujo end-to-end (operación real)
 
-1. Abrir archivo `.xlsm`
-2. `Workbook_Open`
-3. Selección de periodo en menú
-4. Sync empleados
-5. Generar matriz
-6. Captura / edición en formulario
-7. Guardado en BD
-8. Regenerar matriz
-9. Cierre automático del periodo
+1. Abrir el archivo de la locación `Incidencias_<LOC>.xlsm`
+2. Habilitar macros
+3. Seleccionar periodo (año/mes/SEM o QUIN/número de periodo)
+4. El sistema sincroniza empleados y genera la matriz del periodo
+5. Capturar incidencias **solo por excepción** usando el menú:
+   - Agregar incidencia (solo si el empleado no existe)
+   - Editar incidencia (captura real de incidencias por día)
+6. Ejecutar **Completar incidencias** para llenar automáticamente asistencias faltantes:
+   - Día normal → `X`
+   - Domingo → `PD`
+   - Festivo → `DF`
+7. Revisar y finalmente **Cerrar periodo** (bloquea cambios)
 
 ---
+
+## 📦 Distribución V1 (62 archivos por locación)
+
+La V1 se opera con **1 archivo por locación** (ej. `Incidencias_CUN.xlsm`).
+
+### Estructura de carpetas (estándar)
+Cada archivo se guarda en:
+
+`<RAIZ>\ <LOC>\ REPORTE DE INCIDENCIAS DE NOMINA\ Incidencias_<LOC>.xlsm`
+
+Donde:
+- **RAIZ** = carpeta raíz de gerentes (OneDrive) definida en el template.
+- **LOC** = código de locación (ej. CUN, MID, MTY, etc.)
+
+### Cómo se generan los 62 archivos
+Desde el **template** (archivo base), se ejecuta el generador:
+- Lee `tblLocaciones` y toma las locaciones con `Active = 1`
+- Crea carpetas faltantes
+- Genera una copia `.xlsm` por locación
+- En cada archivo nuevo “setea” su configuración (LocationCode, LocationName, CC, etc.)
+- Marca `IsTemplate = 0` en cada archivo generado
+
+📌 Resultado: cada gerente recibe **solo el archivo de su locación**, y trabaja por periodo.
+
 
 ## ✈️ Excepción CAP (Cancún Aeropuerto)
 
