@@ -162,3 +162,24 @@ Matriz de incidencias
   - Filtra por:
     - Locación
     - TipoNomina = TipoPeriodo
+   
+
+
+---
+
+### 🔹 Generador de archivos por locación (Distribución V1)
+
+* **Qué hace**:
+  Genera automáticamente los **62 archivos** (1 por locación) desde el template.
+
+* **Responsabilidades**:
+  * Lee `tblLocaciones` (solo `Active = 1`)
+  * Crea carpetas estándar por locación
+  * Genera `Incidencias_<LOC>.xlsm` dentro de:
+    `<RAIZ>\<LOC>\REPORTE DE INCIDENCIAS DE NOMINA\`
+  * Setea valores en `Config` de cada archivo nuevo:
+    `LocationCode`, `LocationName`, `LocationDisplay`, `CC`, `IsTemplate=0`, etc.
+
+* **Regla clave**:
+  El generador **solo se corre desde el template** (archivo maestro).
+
