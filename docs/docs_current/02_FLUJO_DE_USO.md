@@ -1,33 +1,67 @@
-# 02 — Flujo de uso (operativo)
+# 02 — FLUJO DE USO DEL SISTEMA
 
-## A) Inicio
-1) Abrir el archivo de la locación.
-2) Debe abrirse el menú `frmMenuPrincipal`.
+## Usuarios
+- Gerentes
+- Auxiliares / asistentes
+- Administrador (operador del sistema)
 
-## B) Selección de periodo
-1) Seleccionar Año, Mes, Tipo (Q/S) y Periodo.
-2) Presionar **Aceptar**.
-3) El sistema:
-   - sincroniza empleados
-   - genera/abre matriz
-   - muestra `frmOpciones`
+---
 
-## C) Captura manual (día a día)
-1) En `frmOpciones`, elegir **Editar incidencia**.
-2) En `frmIncidencias`:
-   - buscar empleado
-   - elegir día
-   - seleccionar código y detalles
-   - guardar
+## Flujo estándar
 
-## D) Checador (si aplica)
-1) En `frmOpciones`, elegir **Precargar checador**.
-2) Debe cargar incidencias sin duplicar lo manual.
+### 1. Abrir archivo
+**Sistema:**
+- Ejecuta Workbook_Open
+- Lee configuración
+- Muestra menú
+**Log esperado:** Workbook_Open START/END
 
-## E) Completar incidencias
-1) Usar **Completar incidencias** para asistencias faltantes (si aplica a tu negocio).
+---
 
-## F) Cierre de periodo
-1) Presionar **Cerrar periodo**.
-2) Debe bloquear edición del periodo.
+### 2. Selección de periodo
+**Usuario:**
+- Selecciona locación, año, mes, tipo, periodo
+- Presiona Aceptar
+**Sistema:**
+- Construye periodID
+- Sincroniza empleados
+- Genera matriz
+- Navega a matriz
+**Log esperado:** cmdAceptar_Click
 
+---
+
+### 3. Captura de incidencias
+**Usuario:**
+- Agrega / edita / elimina incidencias
+**Sistema:**
+- Actualiza BDIncidencias_Local
+- Refleja cambios en matriz
+
+---
+
+### 4. Precarga checador (si aplica)
+**Usuario:**
+- Selecciona archivo checador
+**Sistema:**
+- Lee archivo
+- Filtra por locación
+- Inserta/actualiza solo registros checador
+**Log esperado:** PrecargarChecador
+
+---
+
+### 5. Cierre de periodo
+**Usuario:**
+- Ejecuta cierre
+**Sistema:**
+- Bloquea edición
+- Marca periodo cerrado
+**Log esperado:** CerrarPeriodo
+
+---
+
+## Reglas operativas
+- No se permite editar periodo cerrado
+- El checador no pisa capturas manuales
+- No deben mostrarse errores técnicos al usuario final
