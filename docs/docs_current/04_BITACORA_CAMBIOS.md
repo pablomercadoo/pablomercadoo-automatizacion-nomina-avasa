@@ -1,12 +1,26 @@
-# 04 — Bitácora de cambios
+# 04 — BITÁCORA DE CAMBIOS
 
-Formato por cambio:
+## Regla
+Si no está aquí, NO existe.
 
-## YYYY-MM-DD — Título corto
-- **Motivo:**
-- **Qué se tocó:**
-- **Qué se eliminó:**
-- **Riesgo:** Bajo/Medio/Alto
-- **Pruebas pasadas:** (referencia a `03_PRUEBAS_REGRESION.md`)
-- **Notas:**
+---
 
+## Formato
+
+### YYYY-MM-DD — vX.Y.Z
+- Cambio:
+- Motivo:
+- Módulos afectados:
+- Riesgo:
+- Pruebas realizadas:
+
+---
+
+## Historial
+
+### 2026-01-15 — vX.Y.Z
+- Cambio: Implementación de LOG silencioso
+- Motivo: Diagnóstico sin afectar usuarios
+- Módulos: modLog, Workbook_Open, frmMenuPrincipal
+- Riesgo: Bajo
+- Pruebas: TEST_LOG, apertura, aceptar
