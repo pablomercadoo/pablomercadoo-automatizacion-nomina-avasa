@@ -234,10 +234,7 @@ Los forms NO deben contener reglas de negocio complejas.
 
 ## 🧠 Diagrama lógico del sistema (arquitectura general)
 
-```mermaid
-(flowchart completo que te di)
 flowchart TB
-  %% ========== CAPAS ==========
   subgraph UI["CAPA UI (Forms / Interacción)"]
     MP["frmMenuPrincipal\n(Seleccionar periodo)"]
     FI["frmIncidencias\n(Captura/Edición)"]
@@ -285,7 +282,6 @@ flowchart TB
     TST["modGeneradorTests\n(pruebas)"]
   end
 
-  %% ========== CONEXIONES PRINCIPALES ==========
   WB --> PATH
   WB --> CFG
   WB --> SEC
@@ -335,76 +331,9 @@ flowchart TB
   FI --> LOG
 
   CFG --> TCFG
-  EMP --> DATA
-  BD --> DATA
-  MAT --> DATA
-
   GEN --> CFG
   GEN --> ESYNC
   GEN --> SEC
-  GEN --> DATA
-
   UPD --> CFG
   UPD --> SEC
-
-sequenceDiagram
-  participant U as Usuario
-  participant WB as ThisWorkbook
-  participant MP as frmMenuPrincipal
-  participant ES as modEmpleadosSync
-  participant RI as modReporteIncidencias
-  participant FI as frmIncidencias
-  participant BD as BDIncidencias_Local
-  participant MAT as Matriz M_*
-  participant SEC as modSeguridadIncidencias
-  participant LOG as modLog
-
-  U->>WB: Abrir archivo
-  WB->>LOG: LogStart(Open)
-  WB->>SEC: Inicializar protecciones / permisos
-  WB->>MP: Mostrar menú
-
-  U->>MP: Selecciona Año/Mes/Tipo/Periodo y Aceptar
-  MP->>LOG: LogStart(cmdAceptar)
-  MP->>SEC: Desproteger lo necesario
-  MP->>ES: SyncEmpleados(periodID, force=True)
-  ES->>LOG: LogInfo(Sync ok)
-  MP->>RI: GenerarMatrizPeriodoActual
-  RI->>MAT: Construir/actualizar matriz M_*
-  MP->>RI: IrAMatrizPeriodoActual
-  MP->>SEC: Reproteger
-  MP->>LOG: LogEnd(cmdAceptar)
-
-  U->>MAT: Captura incidencias (Agregar/Editar)
-  MAT->>RI: Botón Agregar/Editar
-  RI->>FI: Abrir form captura/edición
-  FI->>BD: Upsert incidencias (manual)
-  FI->>LOG: LogInfo(Guardado)
-  RI->>MAT: Refrescar visual / regenerar si aplica
-
-sequenceDiagram
-  participant U as Usuario
-  participant MAT as Matriz M_*
-  participant RI as modReporteIncidencias
-  participant FAI as frmAgregarIncidencias
-  participant CHK as modChecadorPrecarga
-  participant BD as BDIncidencias_Local
-  participant SEC as modSeguridadIncidencias
-  participant UID as modUID
-  participant CAT as modCatalogos
-  participant LOG as modLog
-
-  U->>MAT: Botón Agregar (elige método)
-  MAT->>RI: BotónAgregarIncidencia
-  RI->>FAI: Mostrar selector (Manual/Checador)
-
-  U->>FAI: Elige CHECADOR
-  FAI->>CHK: PrecargarBDDesdeChecador_PeriodoActual
-  CHK->>SEC: Validar periodo editable
-  CHK->>CAT: Terminal->CC->Loc (filtrar locación)
-  CHK->>UID: Generar UID si falta
-  CHK->>BD: Upsert masivo (no pisa manual)
-  CHK->>LOG: LogInfo(resumen inserciones/updates)
-  CHK-->>RI: OK
-  RI->>MAT: Regenerar/refrescar matriz
 
