@@ -229,3 +229,182 @@ Los forms NO deben contener reglas de negocio complejas.
 - No duplicar lógica entre módulos
 - Forms = UI, no negocio
 - Configuración solo vía modConfig
+
+---
+
+## 🧠 Diagrama lógico del sistema (arquitectura general)
+
+```mermaid
+(flowchart completo que te di)
+flowchart TB
+  %% ========== CAPAS ==========
+  subgraph UI["CAPA UI (Forms / Interacción)"]
+    MP["frmMenuPrincipal\n(Seleccionar periodo)"]
+    FI["frmIncidencias\n(Captura/Edición)"]
+    FAI["frmAgregarIncidencias\n(Manual vs Checador)"]
+    FO["frmOpciones\n(Opciones avanzadas)"]
+  end
+
+  subgraph ENTRY["ENTRADAS / ARRANQUE"]
+    WB["ThisWorkbook.Workbook_Open\n(Arranque + Autofix + Seguridad)"]
+  end
+
+  subgraph CORE["CORE (Orquestación / Negocio)"]
+    RI["modReporteIncidencias\n(Matriz, Botones, Completar, Cerrar)"]
+    CHK["modChecadorPrecarga\n(UPSERT checador a BD)"]
+    ESYNC["modEmpleadosSync\n(Sync/Modo local/Cache)"]
+  end
+
+  subgraph SERVICES["SERVICIOS DE INFRAESTRUCTURA"]
+    CFG["modConfig\n(GetConfig/SetConfig)"]
+    PER["modPeriodos\n(Rangos de periodo)"]
+    SEC["modSeguridadIncidencias\n(Protección + Permisos periodo)"]
+    UID["modUID\n(UID incidencias)"]
+    CAL["modCalendario\n(Reglas de fechas)"]
+    CATI["modCatalogoIncidencias\n(Códigos activos)"]
+    CATG["modCatalogos\n(Terminal->CC->Loc)"]
+    CACHE["modCachePuestoActividad\n(Cache Puesto/Actividad)"]
+    PATH["modAutoFixPaths\n(Autofix rutas)"]
+    LOG["modLog\n(Log silencioso)"]
+    GLOB["ModGlobal\n(gLoc,gAnio,gMes,gTipoPeriodo,gPeriodo,flags)"]
+  end
+
+  subgraph DATA["DATOS (Hojas/Tablas dentro del workbook)"]
+    TCFG["Hoja Config / tblConfig"]
+    EMP["Hoja Empleados / tblEmpleados_Local\n(+ Empleados_Temp)"]
+    BD["Hoja BDIncidencias_Local\n(tabla base)"]
+    MAT["Hojas Matriz: M_LOC_YYYY_MM_Q#\n(captura por día)"]
+  end
+
+  subgraph TOOL["TOOLING / ADMIN (no operativo diario)"]
+    GEN["modGeneradorLocaciones\n(genera 62 archivos)"]
+    UPD["modUpdaterLocaciones\n(actualiza archivos ya generados)"]
+    ADM["modAdmin\n(macros admin)"]
+    EXP["modExportVBA\n(export módulos)"]
+    MTTO["modMantenimientoMatrices\n(reparación/limpieza)"]
+    TST["modGeneradorTests\n(pruebas)"]
+  end
+
+  %% ========== CONEXIONES PRINCIPALES ==========
+  WB --> PATH
+  WB --> CFG
+  WB --> SEC
+  WB --> MP
+  WB --> LOG
+  WB --> GLOB
+
+  MP --> CFG
+  MP --> SEC
+  MP --> ESYNC
+  MP --> RI
+
+  ESYNC --> CFG
+  ESYNC --> EMP
+  ESYNC --> CACHE
+  ESYNC --> LOG
+
+  RI --> PER
+  RI --> CAL
+  RI --> CATI
+  RI --> UID
+  RI --> SEC
+  RI --> CFG
+  RI --> BD
+  RI --> MAT
+  RI --> FI
+  RI --> FO
+  RI --> FAI
+  RI --> LOG
+
+  FAI --> CHK
+  CHK --> CATG
+  CHK --> PER
+  CHK --> UID
+  CHK --> SEC
+  CHK --> CFG
+  CHK --> BD
+  CHK --> MAT
+  CHK --> LOG
+
+  FI --> CATI
+  FI --> UID
+  FI --> SEC
+  FI --> CFG
+  FI --> EMP
+  FI --> BD
+  FI --> LOG
+
+  CFG --> TCFG
+  EMP --> DATA
+  BD --> DATA
+  MAT --> DATA
+
+  GEN --> CFG
+  GEN --> ESYNC
+  GEN --> SEC
+  GEN --> DATA
+
+  UPD --> CFG
+  UPD --> SEC
+
+sequenceDiagram
+  participant U as Usuario
+  participant WB as ThisWorkbook
+  participant MP as frmMenuPrincipal
+  participant ES as modEmpleadosSync
+  participant RI as modReporteIncidencias
+  participant FI as frmIncidencias
+  participant BD as BDIncidencias_Local
+  participant MAT as Matriz M_*
+  participant SEC as modSeguridadIncidencias
+  participant LOG as modLog
+
+  U->>WB: Abrir archivo
+  WB->>LOG: LogStart(Open)
+  WB->>SEC: Inicializar protecciones / permisos
+  WB->>MP: Mostrar menú
+
+  U->>MP: Selecciona Año/Mes/Tipo/Periodo y Aceptar
+  MP->>LOG: LogStart(cmdAceptar)
+  MP->>SEC: Desproteger lo necesario
+  MP->>ES: SyncEmpleados(periodID, force=True)
+  ES->>LOG: LogInfo(Sync ok)
+  MP->>RI: GenerarMatrizPeriodoActual
+  RI->>MAT: Construir/actualizar matriz M_*
+  MP->>RI: IrAMatrizPeriodoActual
+  MP->>SEC: Reproteger
+  MP->>LOG: LogEnd(cmdAceptar)
+
+  U->>MAT: Captura incidencias (Agregar/Editar)
+  MAT->>RI: Botón Agregar/Editar
+  RI->>FI: Abrir form captura/edición
+  FI->>BD: Upsert incidencias (manual)
+  FI->>LOG: LogInfo(Guardado)
+  RI->>MAT: Refrescar visual / regenerar si aplica
+
+sequenceDiagram
+  participant U as Usuario
+  participant MAT as Matriz M_*
+  participant RI as modReporteIncidencias
+  participant FAI as frmAgregarIncidencias
+  participant CHK as modChecadorPrecarga
+  participant BD as BDIncidencias_Local
+  participant SEC as modSeguridadIncidencias
+  participant UID as modUID
+  participant CAT as modCatalogos
+  participant LOG as modLog
+
+  U->>MAT: Botón Agregar (elige método)
+  MAT->>RI: BotónAgregarIncidencia
+  RI->>FAI: Mostrar selector (Manual/Checador)
+
+  U->>FAI: Elige CHECADOR
+  FAI->>CHK: PrecargarBDDesdeChecador_PeriodoActual
+  CHK->>SEC: Validar periodo editable
+  CHK->>CAT: Terminal->CC->Loc (filtrar locación)
+  CHK->>UID: Generar UID si falta
+  CHK->>BD: Upsert masivo (no pisa manual)
+  CHK->>LOG: LogInfo(resumen inserciones/updates)
+  CHK-->>RI: OK
+  RI->>MAT: Regenerar/refrescar matriz
+
