@@ -1,63 +1,231 @@
-# 01 — Mapa del sistema (para handoff)
+# 01 — MAPA DEL SISTEMA
 
-Este documento explica **qué hace cada componente**, **quién lo llama** y **qué toca**.
+## Objetivo
+Este documento permite que cualquier persona técnica (o tú mismo en 6 meses):
+- Entienda el sistema completo
+- Sepa qué módulo hace qué
+- Evite duplicar lógica
+- Sepa dónde tocar y dónde NO tocar
 
-## Idea central
-- **BDIncidencias_Local = verdad** (fuente única).
-- **Matriz = vista** (se puede regenerar).
-- **Forms = UI** (no deben contener reglas duplicadas).
-- **Módulos = lógica** (dominios claros: config, empleados, periodos, incidencias, checador, catálogos).
+---
 
-## Flujo principal (ruta diaria)
-1) `ThisWorkbook.Workbook_Open`
-2) `frmMenuPrincipal` selecciona periodo
-3) `modEmpleadosSync.BuildPeriodID`
-4) `modEmpleadosSync.SyncEmpleados_PeriodoActual`
-5) `modReporteIncidencias` genera/abre matriz
-6) `frmOpciones` menú operativo
-7) `frmIncidencias` captura manual (alta/edición/borrado)
-8) `modChecadorPrecarga` precarga checador (si aplica)
-9) `modPeriodos` + `modSeguridadIncidencias` cierre y enforcement
+## Visión general del sistema
 
-## Componentes
+Flujo principal (macro-nivel):
 
-### Entry points
-- **ThisWorkbook**: arranque (leer config, setear globals, ocultar hojas técnicas, abrir menú).
-- **frmMenuPrincipal**: entrada de usuario (periodo) y arranque del flujo.
-- **frmOpciones**: acciones del periodo (captura, completar, limpiar, eliminar empleado, cerrar periodo).
+Workbook_Open  
+→ frmMenuPrincipal  
+→ Sync empleados  
+→ Generar matriz  
+→ Captura incidencias  
+→ (Opcional) Precarga checador  
+→ Cierre de periodo  
 
-### Dominios
+---
 
-#### Config / Globals
-- `modConfig`: `GetConfig`, `SetConfig`, bloqueo de hoja Config.
-- `modGlobal`: variables globales (estado de locación y periodo).
+## Variables globales críticas
+(definidas principalmente en `ModGlobal`)
 
-#### Empleados
-- `modEmpleadosSync`: construir `periodID`, sincronizar empleados.
-- `modEmpleadosEliminados`: reglas por periodo para excluir empleados.
-- `modRefreshEmpleados` / `modPushEmpleados`: utilidades masivas (admin).
+- gLoc
+- gAnio
+- gMes
+- gTipoPeriodo
+- gPeriodo
+- periodID
+- gIsTemplate
 
-#### Incidencias / Matriz
-- `modReporteIncidencias`: motor de matriz + helpers de BD.
-- `modMantenimientoMatrices`: limpieza / parsing de matrices.
-- `modUID`: UIDs por incidencia/fecha.
+Estas variables definen **el contexto completo del sistema**.
 
-#### Checador
-- `modChecadorLectura`: lectura/validación.
-- `modChecadorPrecarga`: merge a BD (idempotente: no duplicar manual).
+---
 
-#### Periodos / Seguridad
-- `modPeriodos`: estado abierto/cerrado + override.
-- `modSeguridadIncidencias`: proteger/desproteger + validar periodo.
+## Catálogo REAL de módulos (según export VBA)
 
-#### Catálogos
-- `modCatalogoIncidencias`: validación/canonización de códigos.
-- `modCatalogos`: mapeos locación/CC/checador.
-- `modCatalogosPuestoActividad` + `modCachePuestoActividad`: combos y cache.
-- `modCalendario`: festivos.
+### 🔴 CORE DEL SISTEMA (alto riesgo)
 
-## Red flags a vigilar
-- **Shadowing de nombres** (misma función en dos módulos/forms) → causa bugs fantasma.
-- **MsgBox de OK** → sustituir por log/status.
-- Utilerías duplicadas → centralizar en un solo módulo.
+#### ModGlobal
+**Responsabilidad:** Variables globales y helpers base  
+**Riesgo:** Alto  
+**Notas:** Cambios aquí afectan todo el sistema.
 
+---
+
+#### modConfig
+**Responsabilidad:** Lectura y escritura de configuración (`tblConfig`)  
+**Funciones clave:** GetConfig, SetConfig  
+**Riesgo:** Alto  
+**Regla:** Nunca duplicar lógica de configuración fuera de este módulo.
+
+---
+
+#### modPeriodos
+**Responsabilidad:** Lógica de periodos (validación, rangos, tipos)  
+**Riesgo:** Alto  
+**Usado por:** menú, checador, seguridad.
+
+---
+
+#### modReporteIncidencias
+**Responsabilidad:** Generar y navegar matrices de incidencias  
+**Funciones clave:**
+- GenerarMatrizPeriodoActual
+- IrAMatrizPeriodoActual  
+**Riesgo:** Alto
+
+---
+
+#### modSeguridadIncidencias
+**Responsabilidad:** Seguridad y control de edición  
+**Funciones clave:**
+- PermiteEdicionPeriodo
+- ProtegerHojaMatriz
+- SafeProtectSheets  
+**Riesgo:** Alto
+
+---
+
+### 🟠 EMPLEADOS
+
+#### modEmpleadosSync
+**Responsabilidad:** Sincronización de empleados  
+**Modos:**
+- Local (tabla inyectada)
+- Externo (archivo RH, si aplica)  
+**Funciones clave:**
+- SyncEmpleados_PeriodoActual
+- BuildPeriodID  
+**Riesgo:** Alto
+
+---
+
+#### modRefreshEmpleados
+**Responsabilidad:** Refrescar empleados ya existentes  
+**Riesgo:** Medio
+
+---
+
+#### modPushEmpleados
+**Responsabilidad:** Empujar empleados a estructuras locales  
+**Riesgo:** Medio
+
+---
+
+#### modEmpleadosEliminados
+**Responsabilidad:** Manejo de empleados dados de baja  
+**Riesgo:** Medio
+
+---
+
+### 🟡 INCIDENCIAS / CATÁLOGOS
+
+#### modCatalogoIncidencias
+**Responsabilidad:** Catálogo de tipos de incidencias  
+**Riesgo:** Medio
+
+---
+
+#### modCatalogosPuestoActividad
+**Responsabilidad:** Catálogo puesto / actividad  
+**Riesgo:** Medio
+
+---
+
+#### modCachePuestoActividad
+**Responsabilidad:** Cacheo de valores únicos (combos)  
+**Riesgo:** Medio
+
+---
+
+#### modUID
+**Responsabilidad:** Generación de identificadores únicos  
+**Función clave:** BuildUID_Incidencia  
+**Riesgo:** Medio
+
+---
+
+### 🟢 CHECADOR (locaciones específicas)
+
+#### modChecadorLectura
+**Responsabilidad:** Lectura del archivo de checador  
+**Riesgo:** Medio
+
+---
+
+#### modChecadorPrecarga
+**Responsabilidad:** Precarga del checador a BDIncidencias_Local  
+**Riesgo:** Alto  
+**Regla:** El checador SOLO pisa registros marcados como CHECADOR.
+
+---
+
+### 🔵 CALENDARIO / FECHAS
+
+#### modCalendario
+**Responsabilidad:** Manejo de fechas, días, rangos  
+**Riesgo:** Medio
+
+---
+
+### 🟣 GENERACIÓN / MANTENIMIENTO
+
+#### modGeneradorLocaciones
+**Responsabilidad:** Generar archivos por locación  
+**Riesgo:** Alto
+
+---
+
+#### modUpdaterLocaciones
+**Responsabilidad:** Actualizar archivos de locación existentes  
+**Riesgo:** Alto
+
+---
+
+#### modMantenimientoMatrices
+**Responsabilidad:** Limpieza y mantenimiento de matrices  
+**Riesgo:** Medio
+
+---
+
+### ⚪ ADMIN / UTILIDADES
+
+#### modAdmin
+**Responsabilidad:** Funciones administrativas internas  
+**Riesgo:** Bajo
+
+---
+
+#### modAutoFixPaths
+**Responsabilidad:** Corregir rutas automáticamente  
+**Riesgo:** Medio
+
+---
+
+#### modExportVBA
+**Responsabilidad:** Exportación del código VBA  
+**Riesgo:** Bajo
+
+---
+
+#### modGeneradorTests
+**Responsabilidad:** Generación de datos / pruebas internas  
+**Riesgo:** Bajo
+
+---
+
+### 🖥️ FORMULARIOS (UI)
+
+- frmMenuPrincipal — selección de periodo
+- frmIncidencias — captura principal
+- frmAgregarIncidencias — alta directa
+- frmOpciones — opciones/configuración
+
+**Regla UI:**  
+Los forms NO deben contener reglas de negocio complejas.
+
+---
+
+## Reglas de arquitectura (no negociables)
+
+- Un módulo = una responsabilidad
+- No duplicar lógica entre módulos
+- Forms = UI, no negocio
+- Configuración solo vía modConfig
