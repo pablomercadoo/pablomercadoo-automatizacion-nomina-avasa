@@ -1,67 +1,74 @@
-# 02 — FLUJO DE USO DEL SISTEMA
+## 3. Captura de incidencias (COMPLETO)
 
-## Usuarios
-- Gerentes
-- Auxiliares / asistentes
-- Administrador (operador del sistema)
-
----
-
-## Flujo estándar
-
-### 1. Abrir archivo
-**Sistema:**
-- Ejecuta Workbook_Open
-- Lee configuración
-- Muestra menú
-**Log esperado:** Workbook_Open START/END
+### Objetivo
+Registrar incidencias del periodo activo y reflejarlas correctamente en:
+- BDIncidencias_Local (fuente de verdad)
+- Matriz del periodo (vista operativa)
 
 ---
 
-### 2. Selección de periodo
+### Formularios involucrados
+- frmIncidencias (principal)
+- frmAgregarIncidencias (alta específica)
+- frmOpciones (configuración auxiliar)
+
+---
+
+### Flujo operativo
+
+#### 3.1 Alta de incidencia
 **Usuario:**
-- Selecciona locación, año, mes, tipo, periodo
-- Presiona Aceptar
+- Abre formulario
+- Selecciona empleado, día y tipo de incidencia
+- Guarda
+
 **Sistema:**
-- Construye periodID
-- Sincroniza empleados
-- Genera matriz
-- Navega a matriz
-**Log esperado:** cmdAceptar_Click
+- Valida periodo abierto
+- Genera UID si no existe
+- Asigna IDRegistro
+- Inserta en BDIncidencias_Local
+- Actualiza matriz
 
 ---
 
-### 3. Captura de incidencias
+#### 3.2 Edición de incidencia
 **Usuario:**
-- Agrega / edita / elimina incidencias
+- Selecciona incidencia existente
+- Modifica datos
+- Guarda
+
 **Sistema:**
-- Actualiza BDIncidencias_Local
-- Refleja cambios en matriz
+- Actualiza registro existente
+- NO duplica filas
+- Refresca matriz
 
 ---
 
-### 4. Precarga checador (si aplica)
+#### 3.3 Eliminación de incidencia
 **Usuario:**
-- Selecciona archivo checador
+- Elimina incidencia
+
 **Sistema:**
-- Lee archivo
-- Filtra por locación
-- Inserta/actualiza solo registros checador
-**Log esperado:** PrecargarChecador
+- Elimina o marca como eliminado (según implementación)
+- Mantiene integridad de BD
+- Refresca matriz
 
 ---
 
-### 5. Cierre de periodo
-**Usuario:**
-- Ejecuta cierre
-**Sistema:**
-- Bloquea edición
-- Marca periodo cerrado
-**Log esperado:** CerrarPeriodo
+### Reglas de seguridad
+- Si el periodo está cerrado:
+  - No se permite alta / edición / eliminación
+- No se permite capturar fuera del periodo seleccionado
 
 ---
 
-## Reglas operativas
-- No se permite editar periodo cerrado
-- El checador no pisa capturas manuales
-- No deben mostrarse errores técnicos al usuario final
+### Convivencia con checador
+- Registros manuales NO pueden ser pisados por checador
+- Registros CHECADOR solo pueden ser modificados por checador
+
+---
+
+### Criterios de éxito
+- La incidencia aparece correctamente en la matriz
+- No se duplican registros
+- El cierre de periodo bloquea correctamente la captura
